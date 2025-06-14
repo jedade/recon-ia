@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSINT Report Pro - Analyse d'entreprise avancée</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #3498db;
+            --accent: #1abc9c;
+            --light: #ecf0f1;
+            --dark: #34495e;
+            --success: #27ae60;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            color: var(--dark);
+            line-height: 1.6;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* Header */
+        header {
+            background: linear-gradient(90deg, var(--primary) 0%, var(--dark) 100%);
+            color: white;
+            padding: 20px 0;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .logo i {
+            font-size: 28px;
+            color: var(--accent);
+        }
+        
+        .logo h1 {
+            font-size: 24px;
+            font-weight: 700;
+        }
+        
+        .logo span {
+            color: var(--accent);
+        }
+        
+        nav ul {
+            display: flex;
+            list-style: none;
+            gap: 30px;
+        }
+        
+        nav a {
+            color: var(--light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 16px;
+            transition: var(--transition);
+            position: relative;
+            padding: 5px 0;
+        }
+        
+        nav a:hover {
+            color: var(--accent);
+        }
+        
+        nav a::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--accent);
+            transition: var(--transition);
+        }
+        
+        nav a:hover::after {
+            width: 100%;
+        }
+        
+        /* Hero Section */
+        .hero {
+            padding: 80px 0;
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="100%" height="100%" fill="%232c3e50" opacity="0.03"/><path d="M0,100 Q50,50 100,100 T200,100 L200,0 L0,0 Z" fill="%233498db" opacity="0.05"/></svg>') no-repeat center center;
+            background-size: cover;
+            text-align: center;
+        }
+        
+        .hero-content {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .hero h2 {
+            font-size: 42px;
+            margin-bottom: 20px;
+            color: var(--primary);
+            font-weight: 800;
+        }
+        
+        .hero p {
+            font-size: 20px;
+            margin-bottom: 30px;
+            color: var(--dark);
+        }
+        
+        /* Report Generator */
+        .report-generator {
+            background: white;
+            border-radius: 15px;
+            box-shadow: var(--shadow);
+            padding: 40px;
+            margin: -80px auto 50px;
+            position: relative;
+            max-width: 800px;
+        }
+        
+        .generator-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .generator-header h3 {
+            font-size: 28px;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+        
+        .generator-header p {
+            color: #7f8c8d;
+        }
+        
+        .input-group {
+            display: flex;
+            margin-bottom: 25px;
+            position: relative;
+        }
+        
+        .input-group input {
+            flex: 1;
+            padding: 18px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px 0 0 8px;
+            font-size: 16px;
+            transition: var(--transition);
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--secondary);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+        }
+        
+        .input-group button {
+            padding: 0 35px;
+            background: var(--secondary);
+            color: white;
+            border: none;
+            border-radius: 0 8px 8px 0;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .input-group button:hover {
+            background: #2980b9;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin: 60px 0;
+        }
+        
+        .feature-card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+            text-align: center;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        .feature-card i {
+            font-size: 48px;
+            color: var(--secondary);
+            margin-bottom: 20px;
+        }
+        
+        .feature-card h4 {
+            font-size: 22px;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+        
+        /* Footer */
+        footer {
+            background: var(--primary);
+            color: white;
+            padding: 60px 0 30px;
+            margin-top: 50px;
+        }
+        
+        .footer-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .footer-section h4 {
+            font-size: 20px;
+            margin-bottom: 20px;
+            position: relative;
+            padding-bottom: 10px;
+        }
+        
+        .footer-section h4::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 50px;
+            height: 2px;
+            background: var(--accent);
+        }
+        
+        .footer-section p, .footer-section a {
+            color: #bdc3c7;
+            margin-bottom: 10px;
+            display: block;
+            text-decoration: none;
+            transition: var(--transition);
+        }
+        
+        .footer-section a:hover {
+            color: var(--accent);
+            padding-left: 5px;
+        }
+        
+        .social-icons {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .social-icons a {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            transition: var(--transition);
+        }
+        
+        .social-icons a:hover {
+            background: var(--accent);
+            transform: translateY(-5px);
+        }
+        
+        .copyright {
+            text-align: center;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: #bdc3c7;
+            font-size: 14px;
+        }
+        
+        /* Loading Animation */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(52, 152, 219, 0.2);
+            border-top: 5px solid var(--secondary);
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Result Section */
+        .result {
+            display: none;
+            text-align: center;
+            padding: 30px;
+            background: rgba(39, 174, 96, 0.1);
+            border-radius: 10px;
+            margin-top: 20px;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .result i {
+            font-size: 48px;
+            color: var(--success);
+            margin-bottom: 20px;
+        }
+        
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--success);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 20px;
+            transition: var(--transition);
+        }
+        
+        .download-btn:hover {
+            background: #219653;
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(33, 150, 83, 0.4);
+        }
+        
+        /* Notification Popup */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            max-width: 350px;
+            display: flex;
+            align-items: center;
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
+        }
+        
+        .notification.show {
+            transform: translateX(0);
+        }
+        
+        .notification.success {
+            background-color: #d4edda;
+            border-left: 5px solid var(--success);
+            color: #155724;
+        }
+        
+        .notification.error {
+            background-color: #f8d7da;
+            border-left: 5px solid var(--danger);
+            color: #721c24;
+        }
+        
+        .notification-icon {
+            font-size: 24px;
+            margin-right: 15px;
+        }
+        
+        .notification-content {
+            flex: 1;
+        }
+        
+        .notification-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .notification-close {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: inherit;
+            margin-left: 10px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 20px;
+            }
+            
+            nav ul {
+                gap: 15px;
+            }
+            
+            .hero {
+                padding: 60px 0;
+            }
+            
+            .hero h2 {
+                font-size: 32px;
+            }
+            
+            .hero p {
+                font-size: 18px;
+            }
+            
+            .report-generator {
+                padding: 25px;
+                margin: -50px auto 30px;
+            }
+            
+            .input-group {
+                flex-direction: column;
+            }
+            
+            .input-group input {
+                border-radius: 8px;
+                margin-bottom: 10px;
+            }
+            
+            .input-group button {
+                border-radius: 8px;
+                padding: 15px;
+            }
+            
+            .notification {
+                left: 20px;
+                right: 20px;
+                max-width: none;
+                transform: translateY(-150%);
+            }
+            
+            .notification.show {
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Notification Popup -->
+    <div class="notification" id="notification">
+        <i class="notification-icon" id="notification-icon"></i>
+        <div class="notification-content">
+            <div class="notification-title" id="notification-title"></div>
+            <div id="notification-message"></div>
+        </div>
+        <button class="notification-close" id="notification-close">&times;</button>
+    </div>
+
+    <!-- Header -->
+    <header>
+        <div class="container header-content">
+            <div class="logo">
+                <i class="fas fa-shield-alt"></i>
+                <h1>OSINT <span>Report Pro</span></h1>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="#"><i class="fas fa-home"></i> Accueil</a></li>
+                    <li><a href="#"><i class="fas fa-info-circle"></i> À propos</a></li>
+                    <li><a href="#"><i class="fas fa-cogs"></i> Fonctionnalités</a></li>
+                    <li><a href="#"><i class="fas fa-envelope"></i> Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container hero-content">
+            <h2>Analyse d'Entreprise Avancée</h2>
+            <p>Obtenez des rapports complets de reconnaissance passive en quelques secondes</p>
+        </div>
+    </section>
+
+    <!-- Report Generator -->
+    <div class="container">
+        <div class="report-generator">
+            <div class="generator-header">
+                <h3>Générez votre rapport</h3>
+                <p>Entrez le nom d'une entreprise pour commencer l'analyse</p>
+            </div>
+            
+            <div class="input-group">
+                <input type="text" id="company-name" placeholder="Ex: Google, Société Générale, Total...">
+                <button id="generate-btn"><i class="fas fa-search"></i> Analyser</button>
+            </div>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Analyse en cours... Veuillez patienter</p>
+            </div>
+            
+            <div class="result" id="result">
+                <i class="fas fa-file-pdf"></i>
+                <h3>Rapport généré avec succès !</h3>
+                <p>Votre rapport d'analyse pour "<span id="result-company">Nom de l'entreprise</span>" est prêt au téléchargement.</p>
+                <a href="#" class="download-btn" id="download-btn">
+                    <i class="fas fa-download"></i> Télécharger le PDF
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Features -->
+    <div class="container">
+        <div class="features">
+            <div class="feature-card">
+                <i class="fas fa-globe"></i>
+                <h4>Analyse complète</h4>
+                <p>Détection des domaines, sous-domaines et services exposés avec données techniques</p>
+            </div>
+            
+            <div class="feature-card">
+                <i class="fas fa-server"></i>
+                <h4>Infrastructure</h4>
+                <p>Identification des serveurs, technologies utilisées et configuration réseau</p>
+            </div>
+            
+            <div class="feature-card">
+                <i class="fas fa-shield-alt"></i>
+                <h4>Évaluation sécurité</h4>
+                <p>Détection des vulnérabilités potentielles et recommandations de sécurisation</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>OSINT Report Pro</h4>
+                    <p>L'outil ultime pour l'analyse de reconnaissance passive d'entreprise. Générez des rapports détaillés en quelques clics.</p>
+                    <div class="social-icons">
+                        <a href="#"><i class="fab fa-twitter"></i></a>
+                        <a href="#"><i class="fab fa-linkedin"></i></a>
+                        <a href="#"><i class="fab fa-github"></i></a>
+                    </div>
+                </div>
+                
+                <div class="footer-section">
+                    <h4>Liens utiles</h4>
+                    <a href="#">Accueil</a>
+                    <a href="#">À propos</a>
+                    <a href="#">Fonctionnalités</a>
+                    <a href="#">Tarifs</a>
+                    <a href="#">Contact</a>
+                </div>
+                
+                <div class="footer-section">
+                    <h4>Légal</h4>
+                    <a href="#">Conditions d'utilisation</a>
+                    <a href="#">Politique de confidentialité</a>
+                    <a href="#">Mentions légales</a>
+                    <a href="#">Responsabilité</a>
+                </div>
+                
+                <div class="footer-section">
+                    <h4>Contact</h4>
+                    <p><i class="fas fa-map-marker-alt"></i> Paris, France</p>
+                    <p><i class="fas fa-envelope"></i> contact@osintreport.fr</p>
+                    <p><i class="fas fa-phone"></i> +33 1 23 45 67 89</p>
+                </div>
+            </div>
+            
+            <div class="copyright">
+                <p>&copy; 2023 OSINT Report Pro. Tous droits réservés.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const generateBtn = document.getElementById('generate-btn');
+            const companyInput = document.getElementById('company-name');
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('result');
+            const resultCompany = document.getElementById('result-company');
+            const downloadBtn = document.getElementById('download-btn');
+            
+            // Notification elements
+            const notification = document.getElementById('notification');
+            const notificationIcon = document.getElementById('notification-icon');
+            const notificationTitle = document.getElementById('notification-title');
+            const notificationMessage = document.getElementById('notification-message');
+            const notificationClose = document.getElementById('notification-close');
+            
+            // URL de votre webhook n8n - À MODIFIER
+            const n8nWebhookUrl = "http://localhost:5678/webhook-test/6ea00867-852f-45b3-a97e-33175bf29293";
+            
+            // Fonction pour afficher les notifications
+            function showNotification(type, title, message) {
+                // Définir les styles en fonction du type
+                notification.className = "notification";
+                notification.classList.add(type);
+                notification.classList.add("show");
+                
+                // Définir l'icône et le texte
+                if (type === "success") {
+                    notificationIcon.className = "notification-icon fas fa-check-circle";
+                } else {
+                    notificationIcon.className = "notification-icon fas fa-exclamation-circle";
+                }
+                
+                notificationTitle.textContent = title;
+                notificationMessage.textContent = message;
+                
+                // Fermer automatiquement après 5 secondes
+                setTimeout(() => {
+                    notification.classList.remove("show");
+                }, 5000);
+            }
+            
+            // Fermer la notification
+            notificationClose.addEventListener('click', function() {
+                notification.classList.remove("show");
+            });
+            
+            // Envoi des données à n8n
+            generateBtn.addEventListener('click', async function() {
+                const companyName = companyInput.value.trim();
+                
+                if (companyName === '') {
+                    showNotification("error", "Erreur", "Veuillez entrer un nom d'entreprise");
+                    return;
+                }
+                
+                // Show loading animation
+                loading.style.display = 'block';
+                result.style.display = 'none';
+                
+                try {
+                    // Envoi des données à n8n
+                    const response = await fetch(n8nWebhookUrl, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            // Si nécessaire, ajoutez un en-tête d'authentification
+                            // 'X-API-Key': 'votre_clé_secrète'
+                        },
+                        body: JSON.stringify({ 
+                            company: companyName,
+                            timestamp: new Date().toISOString()
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Erreur HTTP! Statut: ${response.status}`);
+                    }
+                    
+                    // Hide loading
+                    loading.style.display = 'none';
+                    
+                    // Afficher une notification de succès
+                    showNotification("success", "Succès", `Votre demande d'analyse pour "${companyName}" a été envoyée avec succès à n8n.`);
+                    
+                } catch (error) {
+                    // En cas d'erreur
+                    loading.style.display = 'none';
+                    
+                    // Afficher une notification d'erreur
+                    showNotification("error", "Erreur d'envoi", `Problème de connexion à n8n: ${error.message}`);
+                    
+                    console.error('Erreur détaillée:', error);
+                }
+            });
+            
+            // Simulate PDF download
+            downloadBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                alert('Téléchargement du rapport PDF commencé!');
+            });
+        });
+    </script>
+</body>
+</html>
