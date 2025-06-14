@@ -1,16 +1,13 @@
 version: '3.9'
 
 services:
-  # Reverse Proxy Nginx
   nginx:
     image: nginx:alpine
     container_name: nginx
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./nginx/ssl:/etc/nginx/ssl
     depends_on:
       - web
       - api
@@ -18,25 +15,20 @@ services:
       - n8n
     restart: unless-stopped
 
-  # Application Web Statique
   web:
     image: nginx:alpine
     container_name: web
     volumes:
       - ./web:/usr/share/nginx/html
-    expose:
-      - 80
 
-  # API Exemple (Node.js)
   api:
     build: ./api
     container_name: api
     expose:
-      - 3000
+      - 8000
     environment:
-      - PORT=3000
+      - APP_PORT=8000
 
-  # Services existants
   ollama:
     image: ollama/ollama
     container_name: ollama
