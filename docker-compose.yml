@@ -1,0 +1,60 @@
+version: '3.9'
+
+services:
+  # Reverse Proxy Nginx
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - web
+      - api
+      - ollama
+      - n8n
+    restart: unless-stopped
+
+  # Application Web Statique
+  web:
+    image: nginx:alpine
+    container_name: web
+    volumes:
+      - ./web:/usr/share/nginx/html
+    expose:
+      - 80
+
+  # API Exemple (Node.js)
+  api:
+    build: ./api
+    container_name: api
+    expose:
+      - 3000
+    environment:
+      - PORT=3000
+
+  # Services existants
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    volumes:
+      - ./ollama:/root/.ollama
+    expose:
+      - 11434
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    expose:
+      - 5678
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_HOST=n8n
+    restart: unless-stopped
