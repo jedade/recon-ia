@@ -1,4 +1,4 @@
-# 🔍 Nom du Projet
+# 🔍 recon-ia
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#)
