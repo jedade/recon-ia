@@ -6,13 +6,13 @@ services:
     container_name: nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       - web
       - api
       - ollama
-      - n8n
     restart: unless-stopped
 
   web:
@@ -20,14 +20,21 @@ services:
     container_name: web
     volumes:
       - ./web:/usr/share/nginx/html
-
+  
   api:
-    build: ./api
+    build: 
+      context: ./api
+      dockerfile: Dockerfile
     container_name: api
     expose:
       - 8000
     environment:
-      - APP_PORT=8000
+      - FLASK_DEBUG=0
+    volumes:
+      - ./api/main.py:/app/main.py
+      - ./api:/app 
+
+   
 
   ollama:
     image: ollama/ollama
@@ -37,16 +44,30 @@ services:
     expose:
       - 11434
     restart: unless-stopped
+   
 
   n8n:
-    image: n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n
     container_name: n8n
     volumes:
       - ./n8n_data:/home/node/.n8n
-    expose:
-      - 5678
     environment:
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_PORT=5678
+      - N8N_HOST="IP_ADDRESS"
+      - N8N_PROTOCOL=http
+      #- N8N_PATH=/n8n
+      - WEBHOOK_TUNNEL_URL=IP_ADDRESS
+      #- WEBHOOK_URL=https://135.181.141.52/
+      - N8N_SECURE_COOKIE=false
+      - VUE_APP_URL_BASE_API=IP_ADDRESS
+      - NODE_ENV=production
+      - N8N_HOST=localhost
       - N8N_RUNNERS_ENABLED=true
-      - N8N_HOST=n8n
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+      #- N8N_BASIC_AUTH_USER=jediel
+      #- N8N_BASIC_AUTH_PASSWORD=jediel
+      - N8N_TRUST_PROXY=true
+    ports:
+      - "5678:5678"
     restart: unless-stopped
+
