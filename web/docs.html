@@ -1,0 +1,2541 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recon IA — Documentation API</title>
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com;
+        font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:;
+        img-src 'self' data: https:;
+        connect-src 'self';
+        frame-ancestors 'none';
+        base-uri 'self';
+        form-action 'self';
+    ">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <style>
+        :root {
+            --primary: #00d4ff;
+            --primary-dim: rgba(0,212,255,0.12);
+            --primary-border: rgba(0,212,255,0.22);
+            --secondary: #7c3aed;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg: #020817;
+            --surface: #0a1628;
+            --surface2: #0f1f3d;
+            --surface3: #162040;
+            --border: rgba(0,212,255,0.1);
+            --border-hover: rgba(0,212,255,0.3);
+            --text: #e2e8f0;
+            --muted: #64748b;
+            --muted2: #94a3b8;
+            --font: 'Inter', system-ui, sans-serif;
+            --mono: 'Fira Code', 'Cascadia Code', monospace;
+            --radius: 12px;
+            --sidebar-w: 270px;
+            --header-h: 64px;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 15px;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* ═══════════════════════════════════
+           TOP NAV (même style que index.html)
+        ═══════════════════════════════════ */
+        .top-nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: var(--header-h);
+            z-index: 1000;
+            background: rgba(2, 8, 23, 0.96);
+            border-bottom: 1px solid rgba(0,212,255,0.18);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-inner {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            width: 38px; height: 38px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .logo-text {
+            font-size: 1.25rem;
+            font-weight: 800;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .nav-links a {
+            color: #94a3b8;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.92rem;
+            transition: color 0.2s;
+            position: relative;
+            padding: 0.4rem 0;
+        }
+
+        .nav-links a:hover { color: var(--primary); }
+        .nav-links a.active { color: var(--primary); }
+        .nav-links a.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 2px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .nav-badge {
+            background: var(--primary-dim);
+            border: 1px solid var(--primary-border);
+            color: var(--primary);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 20px;
+            letter-spacing: 0.02em;
+        }
+
+        .btn-try {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white !important;
+            padding: 0.5rem 1.1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: opacity 0.2s !important;
+        }
+        .btn-try:hover { opacity: 0.85; }
+
+        /* ═══════════════════════════════════
+           LAYOUT — Sidebar + Content
+        ═══════════════════════════════════ */
+        .layout {
+            display: flex;
+            padding-top: var(--header-h);
+            min-height: 100vh;
+        }
+
+        /* ── Sidebar ── */
+        aside {
+            width: var(--sidebar-w);
+            position: fixed;
+            top: var(--header-h);
+            left: 0;
+            bottom: 0;
+            overflow-y: auto;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 1.5rem 0;
+            z-index: 200;
+        }
+
+        aside::-webkit-scrollbar { width: 4px; }
+        aside::-webkit-scrollbar-track { background: transparent; }
+        aside::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.15); border-radius: 4px; }
+
+        .sidebar-section {
+            padding: 0 1.25rem 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .sidebar-label {
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-family: var(--mono);
+            padding: 0 0 0.5rem;
+            display: block;
+        }
+
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0.45rem 0.75rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.86rem;
+            color: var(--muted2);
+            transition: all 0.2s;
+            margin: 1px 0;
+        }
+
+        .sidebar-link:hover {
+            background: var(--primary-dim);
+            color: var(--primary);
+        }
+
+        .sidebar-link.active {
+            background: var(--primary-dim);
+            color: var(--primary);
+            border-left: 2px solid var(--primary);
+        }
+
+        .sidebar-link i { font-size: 0.75rem; width: 14px; text-align: center; }
+
+        .method-badge {
+            font-family: var(--mono);
+            font-size: 0.62rem;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 4px;
+            margin-left: auto;
+        }
+        .method-get  { background: rgba(16,185,129,0.15); color: #10b981; }
+        .method-post { background: rgba(99,102,241,0.15); color: #818cf8; }
+        .method-put  { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        .method-del  { background: rgba(239,68,68,0.15);  color: #ef4444; }
+
+        /* ── Main content ── */
+        main {
+            margin-left: var(--sidebar-w);
+            flex: 1;
+            max-width: 100%;
+            padding: 2.5rem 3rem 4rem;
+        }
+
+        /* ═══════════════════════════════════
+           HERO DOCS
+        ═══════════════════════════════════ */
+        .docs-hero {
+            background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 3rem;
+            margin-bottom: 3rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .docs-hero::before {
+            content: '';
+            position: absolute;
+            top: -60px; right: -60px;
+            width: 280px; height: 280px;
+            background: radial-gradient(circle, rgba(0,212,255,0.08) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+
+        .docs-hero-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--primary-dim);
+            border: 1px solid var(--primary-border);
+            color: var(--primary);
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+            margin-bottom: 1rem;
+        }
+
+        .docs-hero h1 {
+            font-size: 2.25rem;
+            font-weight: 800;
+            background: linear-gradient(90deg, #e2e8f0, var(--primary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 0.75rem;
+            line-height: 1.2;
+        }
+
+        .docs-hero p {
+            color: var(--muted2);
+            font-size: 1.05rem;
+            max-width: 600px;
+            margin-bottom: 2rem;
+        }
+
+        .hero-stats {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .stat-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0,212,255,0.06);
+            border: 1px solid var(--primary-border);
+            border-radius: 10px;
+            padding: 0.6rem 1rem;
+            font-size: 0.85rem;
+            color: var(--muted2);
+        }
+
+        .stat-pill strong { color: var(--primary); font-family: var(--mono); }
+
+        /* ═══════════════════════════════════
+           SECTIONS
+        ═══════════════════════════════════ */
+        .doc-section {
+            margin-bottom: 4rem;
+            scroll-margin-top: calc(var(--header-h) + 1rem);
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .section-icon {
+            width: 40px; height: 40px;
+            background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(124,58,237,0.15));
+            border: 1px solid var(--primary-border);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--primary);
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .section-header h2 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #e2e8f0;
+        }
+
+        .section-header p {
+            color: var(--muted);
+            font-size: 0.88rem;
+            margin-top: 2px;
+        }
+
+        /* ═══════════════════════════════════
+           ENDPOINT CARDS
+        ═══════════════════════════════════ */
+        .endpoint-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+
+        .endpoint-card:hover { border-color: var(--border-hover); }
+
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 1.1rem 1.5rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .ep-method {
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 6px;
+            min-width: 54px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .ep-post { background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.25); }
+        .ep-get  { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.25); }
+        .ep-put  { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25); }
+        .ep-del  { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
+        .ep-patch{ background: rgba(0,212,255,0.1);   color: var(--primary); border: 1px solid var(--primary-border); }
+
+        .ep-path {
+            font-family: var(--mono);
+            font-size: 0.92rem;
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+
+        .ep-desc {
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-left: auto;
+        }
+
+        .ep-auth-badge {
+            font-size: 0.7rem;
+            color: var(--warning);
+            background: rgba(245,158,11,0.1);
+            border: 1px solid rgba(245,158,11,0.2);
+            padding: 2px 8px;
+            border-radius: 20px;
+            flex-shrink: 0;
+        }
+
+        .ep-chevron {
+            color: var(--muted);
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .endpoint-body {
+            display: none;
+            padding: 0 1.5rem 1.5rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .endpoint-body.open { display: block; }
+
+        .ep-section-title {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-family: var(--mono);
+            margin: 1.25rem 0 0.6rem;
+        }
+
+        /* ═══════════════════════════════════
+           PARAMS TABLE
+        ═══════════════════════════════════ */
+        .params-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.84rem;
+        }
+
+        .params-table th {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            color: var(--muted);
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border);
+            font-family: var(--mono);
+        }
+
+        .params-table td {
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid rgba(0,212,255,0.05);
+            vertical-align: top;
+        }
+
+        .params-table tr:last-child td { border-bottom: none; }
+
+        .param-name {
+            font-family: var(--mono);
+            color: var(--primary);
+            font-size: 0.82rem;
+        }
+
+        .param-type {
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            color: var(--muted2);
+            background: rgba(255,255,255,0.04);
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+
+        .param-required {
+            font-size: 0.68rem;
+            color: var(--danger);
+            background: rgba(239,68,68,0.1);
+            border: 1px solid rgba(239,68,68,0.2);
+            padding: 1px 6px;
+            border-radius: 10px;
+        }
+
+        .param-optional {
+            font-size: 0.68rem;
+            color: var(--muted);
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            padding: 1px 6px;
+            border-radius: 10px;
+        }
+
+        /* ═══════════════════════════════════
+           CODE BLOCKS
+        ═══════════════════════════════════ */
+        .code-block {
+            background: #010c1a;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 0.75rem 0;
+        }
+
+        .code-block-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 1rem;
+            background: rgba(0,212,255,0.04);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .code-lang {
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .code-copy {
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .code-copy:hover { color: var(--primary); }
+
+        pre {
+            padding: 1.1rem 1.25rem;
+            overflow-x: auto;
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            line-height: 1.7;
+            color: #e2e8f0;
+        }
+
+        pre::-webkit-scrollbar { height: 4px; }
+        pre::-webkit-scrollbar-track { background: transparent; }
+        pre::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.15); border-radius: 4px; }
+
+        .hl-key   { color: #79c0ff; }
+        .hl-str   { color: #a5d6ff; }
+        .hl-num   { color: #f2cc60; }
+        .hl-bool  { color: #ff7b72; }
+        .hl-null  { color: var(--muted); }
+        .hl-url   { color: var(--primary); }
+        .hl-muted { color: var(--muted); }
+        .hl-green { color: #3fb950; }
+        .hl-cyan  { color: var(--primary); }
+
+        /* ═══════════════════════════════════
+           RESPONSE BADGES
+        ═══════════════════════════════════ */
+        .responses {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .response-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.02);
+            font-size: 0.84rem;
+        }
+
+        .http-code {
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            font-weight: 700;
+            min-width: 36px;
+        }
+
+        .http-200 { color: #10b981; }
+        .http-201 { color: #34d399; }
+        .http-400 { color: var(--warning); }
+        .http-401 { color: var(--danger); }
+        .http-404 { color: var(--warning); }
+        .http-429 { color: #c084fc; }
+        .http-500 { color: var(--danger); }
+
+        /* ═══════════════════════════════════
+           TOOL GRID
+        ═══════════════════════════════════ */
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .tool-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .tool-card:hover {
+            border-color: var(--border-hover);
+            box-shadow: 0 0 20px rgba(0,212,255,0.06);
+        }
+
+        .tool-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 0.75rem;
+        }
+
+        .tool-icon {
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, rgba(0,212,255,0.12), rgba(124,58,237,0.12));
+            border: 1px solid var(--primary-border);
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--primary);
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+
+        .tool-name {
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .tool-desc { font-size: 0.82rem; color: var(--muted2); line-height: 1.5; }
+
+        /* ═══════════════════════════════════
+           ALERT / CALLOUT
+        ═══════════════════════════════════ */
+        .callout {
+            display: flex;
+            gap: 12px;
+            padding: 1rem 1.25rem;
+            border-radius: 10px;
+            margin: 1.25rem 0;
+            font-size: 0.86rem;
+            line-height: 1.6;
+        }
+
+        .callout-info {
+            background: rgba(0,212,255,0.06);
+            border: 1px solid var(--primary-border);
+            color: var(--muted2);
+        }
+
+        .callout-warn {
+            background: rgba(245,158,11,0.06);
+            border: 1px solid rgba(245,158,11,0.2);
+            color: #fcd34d;
+        }
+
+        .callout-danger {
+            background: rgba(239,68,68,0.06);
+            border: 1px solid rgba(239,68,68,0.2);
+            color: #fca5a5;
+        }
+
+        .callout i { margin-top: 2px; flex-shrink: 0; }
+
+        /* ═══════════════════════════════════
+           STEP FLOW
+        ═══════════════════════════════════ */
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .step {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+        .step-num {
+            width: 32px; height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700;
+            font-size: 0.8rem;
+            flex-shrink: 0;
+            color: white;
+        }
+
+        .step-content h4 { font-size: 0.92rem; font-weight: 600; color: #e2e8f0; margin-bottom: 3px; }
+        .step-content p  { font-size: 0.83rem; color: var(--muted); line-height: 1.5; }
+
+        /* ═══════════════════════════════════
+           INLINE CODE
+        ═══════════════════════════════════ */
+        code {
+            font-family: var(--mono);
+            font-size: 0.82em;
+            background: rgba(0,212,255,0.08);
+            color: var(--primary);
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+
+        /* ═══════════════════════════════════
+           FOOTER (même que index.html)
+        ═══════════════════════════════════ */
+        footer {
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            padding: 2rem 3rem;
+            margin-left: var(--sidebar-w);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        footer p { color: var(--muted); font-size: 0.8rem; }
+
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+            list-style: none;
+        }
+
+        .footer-links a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 0.78rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover { color: var(--primary); }
+
+        /* ═══════════════════════════════════
+           SEARCH BAR
+        ═══════════════════════════════════ */
+        .search-wrapper {
+            padding: 0 1.25rem 1rem;
+        }
+
+        .search-input {
+            width: 100%;
+            background: rgba(0,212,255,0.04);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.55rem 0.75rem 0.55rem 2.2rem;
+            color: var(--text);
+            font-size: 0.82rem;
+            font-family: var(--font);
+            outline: none;
+            transition: border-color 0.2s;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cpath d='m21 21-4.35-4.35'%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: 0.6rem center;
+        }
+
+        .search-input:focus { border-color: var(--primary-border); }
+        .search-input::placeholder { color: var(--muted); }
+
+        /* ═══════════════════════════════════
+           MOBILE
+        ═══════════════════════════════════ */
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 1.4rem;
+            cursor: pointer;
+        }
+
+        @media (max-width: 900px) {
+            .mobile-menu-btn { display: flex; }
+            aside {
+                transform: translateX(-100%);
+                transition: transform 0.3s;
+                z-index: 500;
+            }
+            aside.open { transform: translateX(0); }
+            main { margin-left: 0; padding: 1.5rem; }
+            footer { margin-left: 0; padding: 1.5rem; }
+            .ep-desc { display: none; }
+            .docs-hero { padding: 2rem; }
+            .docs-hero h1 { font-size: 1.6rem; }
+        }
+
+        @media (max-width: 600px) {
+            .hero-stats { flex-direction: column; }
+            .nav-links { display: none; }
+        }
+
+        /* ═══════════════════════════════════
+           DIVIDER
+        ═══════════════════════════════════ */
+        hr.divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 2rem 0;
+        }
+
+        /* anchor offset for sticky header */
+        [id] { scroll-margin-top: calc(var(--header-h) + 1.5rem); }
+    </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     TOP NAV
+══════════════════════════════════════════ -->
+<nav class="top-nav">
+    <div class="nav-inner">
+        <a href="index.html" class="logo">
+            <div class="logo-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+                    <path d="M2 17H22" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 12L12 17L22 12" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M12 17V22" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <span class="logo-text">Recon <span style="color: var(--primary);">IA</span></span>
+        </a>
+
+        <div class="nav-links">
+            <a href="index.html">Accueil</a>
+            <a href="index.html#features">Fonctionnalités</a>
+            <a href="docs.html" class="active">Documentation</a>
+            <span class="nav-badge">v1.0</span>
+            <a href="index.html#report" class="btn-try"><i class="fas fa-rocket" style="margin-right:4px"></i> Commencer</a>
+        </div>
+
+        <button class="mobile-menu-btn" onclick="document.querySelector('aside').classList.toggle('open')" aria-label="Menu">
+            <i class="fas fa-bars"></i>
+        </button>
+    </div>
+</nav>
+
+<div class="layout">
+
+<!-- ══════════════════════════════════════════
+     SIDEBAR
+══════════════════════════════════════════ -->
+<aside id="sidebar">
+
+    <div class="search-wrapper">
+        <input class="search-input" type="text" placeholder="Rechercher..." id="sidebar-search" oninput="filterSidebar(this.value)">
+    </div>
+
+    <div class="sidebar-section">
+        <span class="sidebar-label">Démarrage</span>
+        <a href="#introduction"   class="sidebar-link"><i class="fas fa-book-open"></i> Introduction</a>
+        <a href="#auth"           class="sidebar-link"><i class="fas fa-key"></i> Authentification</a>
+        <a href="#rate-limiting"  class="sidebar-link"><i class="fas fa-gauge-high"></i> Rate Limiting</a>
+        <a href="#errors"         class="sidebar-link"><i class="fas fa-triangle-exclamation"></i> Codes d'erreur</a>
+    </div>
+
+    <div class="sidebar-section">
+        <span class="sidebar-label">Endpoints</span>
+        <a href="#ep-login"       class="sidebar-link"><i class="fas fa-lock"></i> Login <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-recon-post"  class="sidebar-link"><i class="fas fa-plus"></i> Créer scan <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-verify"      class="sidebar-link"><i class="fas fa-check"></i> Vérifier OTP <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-recon-list"  class="sidebar-link"><i class="fas fa-list"></i> Lister scans <span class="method-badge method-get">GET</span></a>
+        <a href="#ep-recon-get"   class="sidebar-link"><i class="fas fa-search"></i> Détail scan <span class="method-badge method-get">GET</span></a>
+        <a href="#ep-recon-put"   class="sidebar-link"><i class="fas fa-edit"></i> Modifier scan <span class="method-badge method-put">PUT</span></a>
+        <a href="#ep-recon-del"   class="sidebar-link"><i class="fas fa-trash"></i> Supprimer <span class="method-badge method-del">DEL</span></a>
+        <a href="#ep-pass-recon"  class="sidebar-link"><i class="fas fa-radar"></i> Pass. Recon <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-crawl"       class="sidebar-link"><i class="fas fa-spider"></i> Crawl <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-crtsh"       class="sidebar-link"><i class="fas fa-certificate"></i> crt.sh <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-dns"         class="sidebar-link"><i class="fas fa-server"></i> DNS Info <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-sslscan"     class="sidebar-link"><i class="fas fa-shield"></i> SSL Scan <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-holehe"      class="sidebar-link"><i class="fas fa-user-secret"></i> Holehe <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-sublist3r"   class="sidebar-link"><i class="fas fa-sitemap"></i> Sublist3r <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-netcraft"    class="sidebar-link"><i class="fas fa-network-wired"></i> Netcraft <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-logs"        class="sidebar-link"><i class="fas fa-scroll"></i> Logs <span class="method-badge method-get">GET</span></a>
+        <a href="#ep-analyze"     class="sidebar-link"><i class="fas fa-brain"></i> Analyse IA <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-analyze-status" class="sidebar-link"><i class="fas fa-heartbeat"></i> Statut IA <span class="method-badge method-get">GET</span></a>
+        <a href="#ep-final-report" class="sidebar-link"><i class="fas fa-file-alt"></i> Rapport Final IA <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-report-gen"  class="sidebar-link"><i class="fas fa-file-pdf"></i> Générer PDF <span class="method-badge method-post">POST</span></a>
+        <a href="#ep-report-dl"   class="sidebar-link"><i class="fas fa-download"></i> Télécharger PDF <span class="method-badge method-get">GET</span></a>
+    </div>
+
+    <div class="sidebar-section">
+        <span class="sidebar-label">Outils Recon</span>
+        <a href="#tools-dns"     class="sidebar-link"><i class="fas fa-globe"></i> DNS & IP</a>
+        <a href="#tools-ssl"     class="sidebar-link"><i class="fas fa-lock"></i> SSL / TLS</a>
+        <a href="#tools-sub"     class="sidebar-link"><i class="fas fa-sitemap"></i> Sous-domaines</a>
+        <a href="#tools-http"    class="sidebar-link"><i class="fas fa-code"></i> HTTP & Web</a>
+        <a href="#tools-email"   class="sidebar-link"><i class="fas fa-envelope"></i> Email & WHOIS</a>
+    </div>
+
+    <div class="sidebar-section">
+        <span class="sidebar-label">Guides</span>
+        <a href="#ia-analysis"  class="sidebar-link"><i class="fas fa-robot"></i> IA Dual (Groq + OpenRouter)</a>
+        <a href="#workflow"     class="sidebar-link"><i class="fas fa-diagram-project"></i> Workflow complet</a>
+        <a href="#examples"     class="sidebar-link"><i class="fas fa-terminal"></i> Exemples cURL</a>
+    </div>
+</aside>
+
+<!-- ══════════════════════════════════════════
+     MAIN CONTENT
+══════════════════════════════════════════ -->
+<main>
+
+    <!-- ── HERO ── -->
+    <div class="docs-hero">
+        <div class="docs-hero-tag"><i class="fas fa-book"></i> Documentation officielle</div>
+        <h1>API Recon IA</h1>
+        <p>Documentation complète de tous les endpoints REST, outils OSINT et flux d'intégration de la plateforme de reconnaissance passive.</p>
+        <div class="hero-stats">
+            <div class="stat-pill"><i class="fas fa-plug" style="color:var(--primary)"></i> <strong>14</strong> endpoints</div>
+            <div class="stat-pill"><i class="fas fa-tools" style="color:var(--primary)"></i> <strong>20+</strong> outils OSINT</div>
+            <div class="stat-pill"><i class="fas fa-lock" style="color:var(--primary)"></i> <strong>HTTP Basic Auth</strong></div>
+            <div class="stat-pill"><i class="fas fa-code" style="color:var(--primary)"></i> <strong>JSON</strong> API REST</div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════
+         INTRODUCTION
+    ═══════════════════ -->
+    <section class="doc-section" id="introduction">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-book-open"></i></div>
+            <div>
+                <h2>Introduction</h2>
+                <p>Vue d'ensemble de l'API Recon IA</p>
+            </div>
+        </div>
+
+        <p style="color:var(--muted2); margin-bottom:1rem;">Recon IA expose une API REST JSON qui permet d'effectuer de la reconnaissance passive sur des domaines cibles. Toutes les réponses suivent une enveloppe standardisée.</p>
+
+        <div class="callout callout-info">
+            <i class="fas fa-circle-info" style="color:var(--primary)"></i>
+            <div><strong style="color:var(--primary)">Base URL</strong><br>
+            L'API est exposée sur le port <code>8080</code> du serveur. Exemple : <code>https://api.idachallenge.bj</code></div>
+        </div>
+
+        <p class="ep-section-title">Format de réponse standardisé</p>
+        <div class="code-block">
+            <div class="code-block-header">
+                <span class="code-lang">JSON — Succès</span>
+                <button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button>
+            </div>
+            <pre>{
+  <span class="hl-key">"success"</span>: <span class="hl-bool">true</span>,
+  <span class="hl-key">"data"</span>: { <span class="hl-muted">/* objet ou tableau */</span> },
+  <span class="hl-key">"message"</span>: <span class="hl-str">"Opération réussie"</span>
+}</pre>
+        </div>
+        <div class="code-block">
+            <div class="code-block-header">
+                <span class="code-lang">JSON — Erreur</span>
+                <button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button>
+            </div>
+            <pre>{
+  <span class="hl-key">"success"</span>: <span class="hl-bool">false</span>,
+  <span class="hl-key">"error"</span>: <span class="hl-str">"Description de l'erreur"</span>
+}</pre>
+        </div>
+    </section>
+
+    <!-- ═══════════════════
+         AUTHENTIFICATION
+    ═══════════════════ -->
+    <section class="doc-section" id="auth">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-key"></i></div>
+            <div>
+                <h2>Authentification</h2>
+                <p>HTTP Basic Auth sur tous les endpoints protégés</p>
+            </div>
+        </div>
+
+        <p style="color:var(--muted2); margin-bottom:1rem;">Les endpoints sensibles requièrent une authentification <strong>HTTP Basic Auth</strong> (Base64 de <code>email:mot_de_passe</code>). Un endpoint <code>POST /auth/login</code> permet de valider les credentials avant d'effectuer des appels.</p>
+
+        <div class="callout callout-warn">
+            <i class="fas fa-triangle-exclamation" style="color:var(--warning)"></i>
+            <div>Les credentials admin (<code>ADMIN_EMAIL</code> et <code>ADMIN_PASSWORD_HASH</code>) sont définis dans le fichier <code>.env</code>. Ne les exposez jamais dans le code ou les logs.</div>
+        </div>
+
+        <p class="ep-section-title">Exemple d'en-tête Authorization</p>
+        <div class="code-block">
+            <div class="code-block-header">
+                <span class="code-lang">HTTP Header</span>
+                <button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button>
+            </div>
+            <pre><span class="hl-key">Authorization</span>: Basic <span class="hl-str">base64(email:password)</span>
+
+<span class="hl-muted"># Exemple avec cURL :</span>
+curl -u <span class="hl-str">"admin@example.com:monmotdepasse"</span> \
+     -X POST https://api.idachallenge.bj/pass_recon \
+     -H <span class="hl-str">"Content-Type: application/json"</span> \
+     -d '{"domain": "example.com"}'</pre>
+        </div>
+    </section>
+
+    <!-- ═══════════════════
+         RATE LIMITING
+    ═══════════════════ -->
+    <section class="doc-section" id="rate-limiting">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-gauge-high"></i></div>
+            <div>
+                <h2>Rate Limiting</h2>
+                <p>Limites de débit par endpoint</p>
+            </div>
+        </div>
+        <table class="params-table">
+            <thead>
+                <tr>
+                    <th>Endpoint</th>
+                    <th>Limite</th>
+                    <th>Scope</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td><code>POST /auth/login</code></td><td><span class="param-type">10 / minute</span></td><td>Par IP</td></tr>
+                <tr><td><code>POST /recon</code></td><td><span class="param-type">20 / heure</span></td><td>Par IP</td></tr>
+                <tr><td><code>POST /pass_recon</code></td><td><span class="param-type">10 / heure</span></td><td>Par IP</td></tr>
+                <tr><td><code>Autres endpoints</code></td><td><span class="param-type">Défaut global</span></td><td>Par IP</td></tr>
+            </tbody>
+        </table>
+        <div class="callout callout-info" style="margin-top:1rem;">
+            <i class="fas fa-circle-info" style="color:var(--primary)"></i>
+            <div>En cas de dépassement, l'API retourne un <code>HTTP 429 Too Many Requests</code>.</div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════
+         CODES D'ERREUR
+    ═══════════════════ -->
+    <section class="doc-section" id="errors">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-triangle-exclamation"></i></div>
+            <div>
+                <h2>Codes d'erreur HTTP</h2>
+                <p>Codes de statut renvoyés par l'API</p>
+            </div>
+        </div>
+        <div class="responses">
+            <div class="response-row"><span class="http-code http-200">200</span><span style="color:var(--success)">OK</span> — Requête traitée avec succès</div>
+            <div class="response-row"><span class="http-code http-201">201</span><span style="color:#34d399">Created</span> — Ressource créée</div>
+            <div class="response-row"><span class="http-code http-400">400</span><span style="color:var(--warning)">Bad Request</span> — Paramètres invalides ou manquants</div>
+            <div class="response-row"><span class="http-code http-401">401</span><span style="color:var(--danger)">Unauthorized</span> — Credentials absents ou incorrects</div>
+            <div class="response-row"><span class="http-code http-404">404</span><span style="color:var(--warning)">Not Found</span> — Ressource introuvable</div>
+            <div class="response-row"><span class="http-code http-429">429</span><span style="color:#c084fc">Too Many Requests</span> — Limite de débit dépassée</div>
+            <div class="response-row"><span class="http-code http-500">500</span><span style="color:var(--danger)">Internal Server Error</span> — Erreur serveur inattendue</div>
+        </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ═══════════════════════════════════════════
+         ENDPOINTS
+    ═══════════════════════════════════════════ -->
+    <section class="doc-section" id="endpoints">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-plug"></i></div>
+            <div>
+                <h2>Endpoints</h2>
+                <p>Référence complète de tous les endpoints disponibles</p>
+            </div>
+        </div>
+
+        <!-- POST /auth/login -->
+        <div class="endpoint-card" id="ep-login">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/auth/login</span>
+                <span class="ep-desc">Valider les credentials admin</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Valide les identifiants administrateur (email + mot de passe). Endpoint public — aucune authentification préalable requise.</p>
+
+                <p class="ep-section-title">Corps de la requête</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">email</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td><td>Email administrateur</td></tr>
+                        <tr><td><span class="param-name">password</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td><td>Mot de passe en clair (comparé via hash bcrypt)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Exemple</p>
+                <div class="code-block">
+                    <div class="code-block-header"><span class="code-lang">cURL</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+                    <pre>curl -X POST https://api.idachallenge.bj/auth/login \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{<span class="hl-key">"email"</span>: <span class="hl-str">"admin@example.com"</span>, <span class="hl-key">"password"</span>: <span class="hl-str">"motdepasse"</span>}'</pre>
+                </div>
+
+                <p class="ep-section-title">Réponses</p>
+                <div class="responses">
+                    <div class="response-row"><span class="http-code http-200">200</span><code>{"success": true, "message": "Authentification réussie."}</code></div>
+                    <div class="response-row"><span class="http-code http-401">401</span>Identifiants invalides</div>
+                    <div class="response-row"><span class="http-code http-429">429</span>10 tentatives/minute dépassées</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /recon -->
+        <div class="endpoint-card" id="ep-recon-post">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/recon</span>
+                <span class="ep-desc">Créer un enregistrement de scan</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Public</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Crée un enregistrement de reconnaissance. Un code OTP à 6 chiffres est envoyé à l'email fourni. L'enregistrement est inactif jusqu'à la validation OTP.</p>
+
+                <div class="callout callout-info">
+                    <i class="fas fa-envelope" style="color:var(--primary)"></i>
+                    <div>Un email de vérification est envoyé automatiquement. Le code OTP expire après <strong>10 minutes</strong>.</div>
+                </div>
+
+                <p class="ep-section-title">Corps de la requête</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">domain</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td><td>Nom de domaine cible (ex: example.com)</td></tr>
+                        <tr><td><span class="param-name">email</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td><td>Email pour recevoir le code OTP et les résultats</td></tr>
+                        <tr><td><span class="param-name">full_name</span></td><td><span class="param-type">string</span></td><td><span class="param-optional">optionnel</span></td><td>Nom complet du demandeur</td></tr>
+                        <tr><td><span class="param-name">organization</span></td><td><span class="param-type">string</span></td><td><span class="param-optional">optionnel</span></td><td>Organisation</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Exemple</p>
+                <div class="code-block">
+                    <div class="code-block-header"><span class="code-lang">cURL</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+                    <pre>curl -X POST https://api.idachallenge.bj/recon \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{
+    <span class="hl-key">"domain"</span>: <span class="hl-str">"example.com"</span>,
+    <span class="hl-key">"email"</span>:  <span class="hl-str">"vous@example.com"</span>,
+    <span class="hl-key">"full_name"</span>: <span class="hl-str">"Jean Dupont"</span>
+  }'</pre>
+                </div>
+
+                <p class="ep-section-title">Réponses</p>
+                <div class="responses">
+                    <div class="response-row"><span class="http-code http-201">201</span>Enregistrement créé — OTP envoyé par email</div>
+                    <div class="response-row"><span class="http-code http-400">400</span>Domaine ou email invalide</div>
+                    <div class="response-row"><span class="http-code http-429">429</span>20 requêtes/heure dépassées</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /verify_email -->
+        <div class="endpoint-card" id="ep-verify">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/verify_email</span>
+                <span class="ep-desc">Valider le code OTP email</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Active l'enregistrement de reconnaissance en validant le code OTP à 6 chiffres reçu par email.</p>
+
+                <p class="ep-section-title">Corps de la requête</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">email</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td><td>Email utilisé lors de la création</td></tr>
+                        <tr><td><span class="param-name">code</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td><td>Code OTP à 6 chiffres reçu par email</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Réponses</p>
+                <div class="responses">
+                    <div class="response-row"><span class="http-code http-200">200</span>Email vérifié — enregistrement activé</div>
+                    <div class="response-row"><span class="http-code http-400">400</span>Code invalide ou expiré</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GET /recon -->
+        <div class="endpoint-card" id="ep-recon-list">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-get">GET</span>
+                <span class="ep-path">/recon</span>
+                <span class="ep-desc">Liste paginée des enregistrements</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Retourne la liste paginée de tous les enregistrements de reconnaissance. Nécessite HTTP Basic Auth.</p>
+
+                <p class="ep-section-title">Paramètres de query</p>
+                <table class="params-table">
+                    <thead><tr><th>Paramètre</th><th>Type</th><th>Défaut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">page</span></td><td><span class="param-type">integer</span></td><td>1</td><td>Numéro de page</td></tr>
+                        <tr><td><span class="param-name">per_page</span></td><td><span class="param-type">integer</span></td><td>20</td><td>Résultats par page (max 100)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Réponse</p>
+                <div class="code-block">
+                    <div class="code-block-header"><span class="code-lang">JSON</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+                    <pre>{
+  <span class="hl-key">"success"</span>: <span class="hl-bool">true</span>,
+  <span class="hl-key">"data"</span>: [ <span class="hl-muted">/* tableau d'enregistrements */</span> ],
+  <span class="hl-key">"total"</span>: <span class="hl-num">42</span>,
+  <span class="hl-key">"page"</span>: <span class="hl-num">1</span>,
+  <span class="hl-key">"per_page"</span>: <span class="hl-num">20</span>,
+  <span class="hl-key">"pages"</span>: <span class="hl-num">3</span>
+}</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- GET /recon/<id> -->
+        <div class="endpoint-card" id="ep-recon-get">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-get">GET</span>
+                <span class="ep-path">/recon/&lt;id&gt;</span>
+                <span class="ep-desc">Détail d'un enregistrement</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Retourne les informations d'un enregistrement sans les données sensibles (email masqué).</p>
+                <p class="ep-section-title">Réponses</p>
+                <div class="responses">
+                    <div class="response-row"><span class="http-code http-200">200</span>Détail de l'enregistrement</div>
+                    <div class="response-row"><span class="http-code http-404">404</span>Enregistrement introuvable</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PUT /recon/<id> -->
+        <div class="endpoint-card" id="ep-recon-put">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-put">PUT</span>
+                <span class="ep-path">/recon/&lt;id&gt;</span>
+                <span class="ep-desc">Mettre à jour un enregistrement</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Met à jour les champs d'identité d'un enregistrement (<code>full_name</code>, <code>organization</code>, <code>status</code>).</p>
+                <p class="ep-section-title">Réponses</p>
+                <div class="responses">
+                    <div class="response-row"><span class="http-code http-200">200</span>Enregistrement mis à jour</div>
+                    <div class="response-row"><span class="http-code http-400">400</span>Champs invalides</div>
+                    <div class="response-row"><span class="http-code http-404">404</span>Enregistrement introuvable</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DELETE /recon/<id> -->
+        <div class="endpoint-card" id="ep-recon-del">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-del">DEL</span>
+                <span class="ep-path">/recon/&lt;id&gt;</span>
+                <span class="ep-desc">Supprimer un enregistrement</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Supprime définitivement un enregistrement et toutes ses données associées.</p>
+                <div class="callout callout-danger">
+                    <i class="fas fa-triangle-exclamation" style="color:var(--danger)"></i>
+                    <div>Cette action est <strong>irréversible</strong>. Toutes les données du scan sont perdues.</div>
+                </div>
+                <p class="ep-section-title">Réponses</p>
+                <div class="responses">
+                    <div class="response-row"><span class="http-code http-200">200</span>Enregistrement supprimé</div>
+                    <div class="response-row"><span class="http-code http-404">404</span>Enregistrement introuvable</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /pass_recon -->
+        <div class="endpoint-card" id="ep-pass-recon">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/pass_recon</span>
+                <span class="ep-desc">Reconnaissance passive complète</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Lance une reconnaissance passive complète sur un domaine. Exécute jusqu'à 20+ outils OSINT en parallèle. Résultats mis en cache pendant 24h.</p>
+
+                <div class="callout callout-warn">
+                    <i class="fas fa-clock" style="color:var(--warning)"></i>
+                    <div>Ce scan peut prendre <strong>2 à 5 minutes</strong> selon le domaine et les outils sélectionnés. Amass (énumération passive) peut prendre jusqu'à 3 minutes.</div>
+                </div>
+
+                <p class="ep-section-title">Corps de la requête</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">domain</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td><td>Nom de domaine à analyser (ex: example.com)</td></tr>
+                        <tr><td><span class="param-name">tools</span></td><td><span class="param-type">array</span></td><td><span class="param-optional">optionnel</span></td><td>Liste des outils à exécuter. Défaut: tous les outils</td></tr>
+                        <tr><td><span class="param-name">force</span></td><td><span class="param-type">boolean</span></td><td><span class="param-optional">optionnel</span></td><td>Forcer un nouveau scan même si en cache (<code>false</code>)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Outils disponibles pour le champ <code>tools</code></p>
+                <div class="code-block">
+                    <div class="code-block-header"><span class="code-lang">Liste des outils</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+                    <pre>[
+  <span class="hl-muted">/* DNS & IP */</span>
+  <span class="hl-str">"dns_records"</span>, <span class="hl-str">"ip_info"</span>, <span class="hl-str">"asn_info"</span>, <span class="hl-str">"ptr_records"</span>,
+  <span class="hl-str">"reverse_ip"</span>, <span class="hl-str">"dnsbl_check"</span>,
+
+  <span class="hl-muted">/* SSL / TLS */</span>
+  <span class="hl-str">"ssl_info"</span>, <span class="hl-str">"tls_config"</span>,
+
+  <span class="hl-muted">/* Sous-domaines */</span>
+  <span class="hl-str">"amass"</span>, <span class="hl-str">"subfinder"</span>, <span class="hl-str">"assetfinder"</span>,
+  <span class="hl-str">"crtsh"</span>, <span class="hl-str">"github"</span>,
+
+  <span class="hl-muted">/* HTTP & Web */</span>
+  <span class="hl-str">"http_methods"</span>, <span class="hl-str">"redirect_chain"</span>, <span class="hl-str">"robots_txt"</span>,
+  <span class="hl-str">"security_headers"</span>, <span class="hl-str">"tech_stack"</span>, <span class="hl-str">"waf_detection"</span>,
+  <span class="hl-str">"favicon_hash"</span>, <span class="hl-str">"archive_history"</span>,
+
+  <span class="hl-muted">/* Email & WHOIS */</span>
+  <span class="hl-str">"email_config"</span>, <span class="hl-str">"whois_info"</span>,
+
+  <span class="hl-muted">/* Sécurité */</span>
+  <span class="hl-str">"subdomain_takeover"</span>
+]</pre>
+                </div>
+
+                <p class="ep-section-title">Exemple — scan sélectif</p>
+                <div class="code-block">
+                    <div class="code-block-header"><span class="code-lang">cURL</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+                    <pre>curl -u <span class="hl-str">"admin@example.com:password"</span> \
+  -X POST https://api.idachallenge.bj/pass_recon \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{
+    <span class="hl-key">"domain"</span>: <span class="hl-str">"example.com"</span>,
+    <span class="hl-key">"tools"</span>: [<span class="hl-str">"dns_records"</span>, <span class="hl-str">"ssl_info"</span>, <span class="hl-str">"security_headers"</span>]
+  }'</pre>
+                </div>
+
+                <p class="ep-section-title">Réponses</p>
+                <div class="responses">
+                    <div class="response-row"><span class="http-code http-200">200</span>Résultats OSINT complets (objet avec un clé par outil)</div>
+                    <div class="response-row"><span class="http-code http-400">400</span>Domaine invalide ou SSRF détecté</div>
+                    <div class="response-row"><span class="http-code http-401">401</span>Authentification requise</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /crawl -->
+        <div class="endpoint-card" id="ep-crawl">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/crawl</span>
+                <span class="ep-desc">Crawling web avec creepyCrawler</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Lance un crawl web passif sur une URL avec l'outil creepyCrawler. Les IP privées et les domaines locaux sont bloqués (protection SSRF).</p>
+
+                <p class="ep-section-title">Corps de la requête</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">url</span></td><td><span class="param-type">string (uri)</span></td><td><span class="param-required">requis</span></td><td>URL à crawler (http:// ou https:// uniquement)</td></tr>
+                        <tr><td><span class="param-name">options</span></td><td><span class="param-type">array</span></td><td><span class="param-optional">optionnel</span></td><td>Options creepyCrawler (voir liste ci-dessous)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Options autorisées</p>
+                <div class="code-block">
+                    <div class="code-block-header"><span class="code-lang">Options</span></div>
+                    <pre><span class="hl-str">--depth</span>      <span class="hl-muted">Profondeur de crawl</span>
+<span class="hl-str">--threads</span>    <span class="hl-muted">Nombre de threads parallèles</span>
+<span class="hl-str">--timeout</span>    <span class="hl-muted">Timeout par requête (secondes)</span>
+<span class="hl-str">--delay</span>      <span class="hl-muted">Délai entre requêtes (secondes)</span>
+<span class="hl-str">--max-urls</span>   <span class="hl-muted">Nombre maximum d'URLs à crawler</span>
+<span class="hl-str">--verbose</span>    <span class="hl-muted">Mode verbeux</span>
+<span class="hl-str">--silent</span>     <span class="hl-muted">Mode silencieux</span></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /crtsh -->
+        <div class="endpoint-card" id="ep-crtsh">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/crtsh</span>
+                <span class="ep-desc">Recherche certificats SSL via crt.sh</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Interroge la base de données publique crt.sh pour lister tous les certificats SSL/TLS émis pour un domaine et ses sous-domaines.</p>
+                <p class="ep-section-title">Corps</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th></tr></thead>
+                    <tbody><tr><td><span class="param-name">domain</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /dns_info -->
+        <div class="endpoint-card" id="ep-dns">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/dns_info</span>
+                <span class="ep-desc">Informations DNS complètes</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Résout tous les types d'enregistrements DNS (A, AAAA, MX, TXT, NS, CNAME, SOA) pour un domaine.</p>
+                <p class="ep-section-title">Corps</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th></tr></thead>
+                    <tbody><tr><td><span class="param-name">domain</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /sslscan -->
+        <div class="endpoint-card" id="ep-sslscan">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/sslscan</span>
+                <span class="ep-desc">Analyse SSL/TLS approfondie</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Lance sslscan pour analyser les protocoles TLS supportés, les suites de chiffrement, les certificats et les vulnérabilités SSL (HEARTBLEED, POODLE, etc.).</p>
+                <p class="ep-section-title">Corps</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th></tr></thead>
+                    <tbody><tr><td><span class="param-name">host</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /holehe -->
+        <div class="endpoint-card" id="ep-holehe">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/holehe</span>
+                <span class="ep-desc">Recherche email sur plateformes</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Utilise holehe pour vérifier si une adresse email est associée à un compte sur diverses plateformes en ligne (Google, Twitter, GitHub, etc.).</p>
+                <p class="ep-section-title">Corps</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th></tr></thead>
+                    <tbody><tr><td><span class="param-name">email</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /sublist3r -->
+        <div class="endpoint-card" id="ep-sublist3r">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/sublist3r</span>
+                <span class="ep-desc">Énumération de sous-domaines</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Utilise Sublist3r pour énumérer les sous-domaines via des moteurs de recherche publics et des sources OSINT.</p>
+                <p class="ep-section-title">Corps</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th></tr></thead>
+                    <tbody><tr><td><span class="param-name">domain</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /netcraft_full_report -->
+        <div class="endpoint-card" id="ep-netcraft">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/netcraft_full_report</span>
+                <span class="ep-desc">Rapport Netcraft complet</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Scrape le rapport Netcraft pour un domaine : technologies détectées, historique d'hébergement, informations réseau et indicateurs de risque.</p>
+                <p class="ep-section-title">Corps</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th></tr></thead>
+                    <tbody><tr><td><span class="param-name">domain</span></td><td><span class="param-type">string</span></td><td><span class="param-required">requis</span></td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- GET /logs -->
+        <div class="endpoint-card" id="ep-logs">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-get">GET</span>
+                <span class="ep-path">/logs</span>
+                <span class="ep-desc">Journal d'audit des requêtes</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Retourne le journal d'audit de toutes les requêtes HTTP traitées par l'API (méthode, endpoint, code HTTP, durée, IP, user-agent).</p>
+                <p class="ep-section-title">Paramètres de query</p>
+                <table class="params-table">
+                    <thead><tr><th>Paramètre</th><th>Type</th><th>Défaut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">page</span></td><td><span class="param-type">integer</span></td><td>1</td><td>Page</td></tr>
+                        <tr><td><span class="param-name">per_page</span></td><td><span class="param-type">integer</span></td><td>50</td><td>Entrées par page</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /analyze -->
+        <div class="endpoint-card" id="ep-analyze">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/analyze</span>
+                <span class="ep-desc">Double agent IA parallèle (Groq + OpenRouter) avec cache BD</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <span class="ep-badge" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.25);">5/h</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">
+                    Exécute <strong>deux agents IA en parallèle</strong> sur les données de <code>/pass_recon</code> :
+                    <br>• <strong style="color:var(--primary);">Groq</strong> (<code>llama-3.3-70b-versatile</code>) — Analyste menaces techniques : CVE actives, exploits, vecteurs d'attaque
+                    <br>• <strong style="color:#a78bfa;">OpenRouter</strong> (<code>qwen3-235b:free</code>) — Auditeur exhaustif : couvre <em>toutes</em> les sections OSINT, documente aussi les bonnes pratiques
+                    <br><br>Les deux rapports sont <strong>fusionnés automatiquement</strong> : findings dédupliqués, <code>risk_score = max(groq, openrouter)</code>, union des forces et actions.
+                    <br><br>
+                    <strong style="color:var(--primary);">Cache intelligent :</strong> si <code>recon_id</code> est fourni et qu'une analyse valide existe en base (non expirée), le résultat est retourné <strong>instantanément</strong> sans appel IA. La nouvelle analyse fusionnée est automatiquement sauvegardée en BD.
+                </p>
+                <div style="display:flex;gap:0.5rem;margin:0.75rem 0;flex-wrap:wrap;">
+                    <span style="background:rgba(239,68,68,0.12);color:#ef4444;padding:2px 10px;border-radius:20px;font-size:0.75rem;font-family:var(--mono)"><i class="fas fa-gauge-high"></i> 5 req/heure</span>
+                    <span style="background:rgba(124,58,237,0.12);color:#a78bfa;padding:2px 10px;border-radius:20px;font-size:0.75rem;font-family:var(--mono)"><i class="fas fa-clock"></i> 2–30s (cache: &lt;100ms)</span>
+                    <span style="background:rgba(0,212,255,0.12);color:var(--primary);padding:2px 10px;border-radius:20px;font-size:0.75rem;font-family:var(--mono)"><i class="fas fa-cloud"></i> Groq + OpenRouter</span>
+                    <span style="background:rgba(16,185,129,0.12);color:#10b981;padding:2px 10px;border-radius:20px;font-size:0.75rem;font-family:var(--mono)"><i class="fas fa-database"></i> Cache BD TTL</span>
+                </div>
+
+                <p class="ep-section-title">Corps (JSON)</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Statut</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">recon_json</span></td><td><span class="param-type">object</span></td><td><span class="param-required">requis</span></td><td>JSON complet retourné par <code>POST /pass_recon</code></td></tr>
+                        <tr><td><span class="param-name">recon_id</span></td><td><span class="param-type">integer</span></td><td><span class="param-optional">optionnel</span></td><td>ID Recon pour activer le cache BD. Si fourni et cache valide → retour instantané sans appel IA</td></tr>
+                        <tr><td><span class="param-name">force_refresh</span></td><td><span class="param-type">boolean</span></td><td><span class="param-optional">optionnel</span></td><td>Forcer une nouvelle analyse même si le cache est valide (défaut: <code>false</code>)</td></tr>
+                        <tr><td><span class="param-name">model</span></td><td><span class="param-type">string</span></td><td><span class="param-optional">optionnel</span></td><td>Surcharger le modèle IA (ex: <code>llama-3.1-8b-instant</code>). Défaut: <code>ANALYSIS_MODEL</code> du .env</td></tr>
+                        <tr><td><span class="param-name">max_search_rounds</span></td><td><span class="param-type">integer</span></td><td><span class="param-optional">optionnel</span></td><td>Nombre max de cycles de recherche web (1–10, défaut : 6)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Comportement du cache</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.6rem;margin-bottom:1rem;">
+                    <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:0.75rem;text-align:center;">
+                        <div style="font-size:0.78rem;font-weight:600;color:#10b981;margin-bottom:0.3rem;">Cache valide</div>
+                        <div style="font-size:0.8rem;color:var(--muted2);">Retour instantané<br><code>"cached": true</code></div>
+                    </div>
+                    <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:0.75rem;text-align:center;">
+                        <div style="font-size:0.78rem;font-weight:600;color:#f59e0b;margin-bottom:0.3rem;">Cache expiré</div>
+                        <div style="font-size:0.8rem;color:var(--muted2);">Appel IA + sauvegarde<br>automatique en BD</div>
+                    </div>
+                    <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:0.75rem;text-align:center;">
+                        <div style="font-size:0.78rem;font-weight:600;color:#ef4444;margin-bottom:0.3rem;">force_refresh: true</div>
+                        <div style="font-size:0.8rem;color:var(--muted2);">Ignore le cache<br>Toujours régénère</div>
+                    </div>
+                </div>
+
+                <p class="ep-section-title">Réponse (200)</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">success</span></td><td><span class="param-type">boolean</span></td><td>Statut de la requête</td></tr>
+                        <tr><td><span class="param-name">cached</span></td><td><span class="param-type">boolean</span></td><td><code>true</code> si retour depuis le cache BD, <code>false</code> si nouvelle analyse</td></tr>
+                        <tr><td><span class="param-name">data.domain</span></td><td><span class="param-type">string</span></td><td>Domaine analysé</td></tr>
+                        <tr><td><span class="param-name">data.risk_score</span></td><td><span class="param-type">integer</span></td><td>Score de risque global 0–100</td></tr>
+                        <tr><td><span class="param-name">data.risk_level</span></td><td><span class="param-type">string</span></td><td><code>CRITICAL</code> | <code>HIGH</code> | <code>MEDIUM</code> | <code>LOW</code></td></tr>
+                        <tr><td><span class="param-name">data.executive_summary</span></td><td><span class="param-type">string</span></td><td>Résumé 3–5 phrases pour un CISO</td></tr>
+                        <tr><td><span class="param-name">data.findings</span></td><td><span class="param-type">array</span></td><td>Vulnérabilités avec <code>severity</code>, <code>evidence</code> (données OSINT exactes), <code>references</code> (CVE/CWE/OWASP), <code>web_sources</code></td></tr>
+                        <tr><td><span class="param-name">data.attack_surface</span></td><td><span class="param-type">object</span></td><td>Sous-domaines, services exposés, technologies, hébergeurs</td></tr>
+                        <tr><td><span class="param-name">data.strengths</span></td><td><span class="param-type">array</span></td><td>Bonnes pratiques déjà en place</td></tr>
+                        <tr><td><span class="param-name">data.immediate_actions</span></td><td><span class="param-type">array</span></td><td>Actions prioritaires (P1=urgent, P2=cette semaine, P3=ce mois)</td></tr>
+                        <tr><td><span class="param-name">data.searches_performed</span></td><td><span class="param-type">array</span></td><td>Recherches web effectuées par l'agent IA</td></tr>
+                        <tr><td><span class="param-name">data.model_used</span></td><td><span class="param-type">string</span></td><td><code>groq+openrouter (merged)</code> si les deux backends ont répondu, sinon le modèle actif</td></tr>
+                        <tr><td><span class="param-name">data.security_score</span></td><td><span class="param-type">integer</span></td><td>Score de sécurité global <strong>0–100</strong> (100 = parfait). Calculé depuis les findings (−25/CRITICAL, −15/HIGH, −8/MEDIUM, −3/LOW) et les strengths (+2 chacun, max +10)</td></tr>
+                        <tr><td><span class="param-name">data.security_grade</span></td><td><span class="param-type">string</span></td><td>Note de sécurité : <code>A+</code>(≥95) / <code>A</code>(≥90) / <code>B+</code>(≥85) / <code>B</code>(≥80) / <code>C+</code>(≥75) / <code>C</code>(≥70) / <code>D+</code>(≥60) / <code>D</code>(≥50) / <code>E</code>(≥35) / <code>F</code>(&lt;35)</td></tr>
+                        <tr><td><span class="param-name">data.security_posture</span></td><td><span class="param-type">string</span></td><td>Appréciation qualitative (ex: <em>"Moyen — plusieurs points de sécurité à corriger"</em>)</td></tr>
+                        <tr><td><span class="param-name">data.security_breakdown</span></td><td><span class="param-type">object</span></td><td>Score par catégorie — DNS, SSL, Email, Web, Infrastructure, Subdomain, Reputation, Cloud. Chaque entrée : <code>score</code>, <code>grade</code>, <code>findings_count</code>, <code>critical</code>, <code>high</code></td></tr>
+                        <tr><td><span class="param-name">data.findings_summary</span></td><td><span class="param-type">object</span></td><td>Comptage des findings : <code>total</code>, <code>critical</code>, <code>high</code>, <code>medium</code>, <code>low</code>, <code>info</code></td></tr>
+                        <tr><td><span class="param-name">data._merge_details</span></td><td><span class="param-type">object</span></td><td>Détails de la fusion : <code>groq_score</code>, <code>openrouter_score</code>, <code>groq_findings</code>, <code>openrouter_findings</code>, <code>merged_findings</code>, <code>groq_searches</code>, <code>openrouter_searches</code></td></tr>
+                        <tr><td><span class="param-name">data._cache</span></td><td><span class="param-type">object</span></td><td><code>generated_at</code>, <code>expires_at</code>, <code>expires_in_h</code>, <code>hit</code> (présent si <code>recon_id</code> fourni)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Codes d'erreur</p>
+                <table class="params-table">
+                    <thead><tr><th>Code</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">400</span></td><td><code>recon_json</code> manquant/invalide ou paramètre <code>model</code> avec caractères interdits</td></tr>
+                        <tr><td><span class="param-name">429</span></td><td>Rate limit dépassé (5 requêtes/heure par IP)</td></tr>
+                        <tr><td><span class="param-name">500</span></td><td>Les deux backends IA ont échoué à produire un rapport (vérifier les logs)</td></tr>
+                        <tr><td><span class="param-name">503</span></td><td>Aucun backend configuré (ni <code>GROQ_API_KEY</code> ni <code>OPENROUTER_API_KEY</code> dans .env)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- GET /analyze/status -->
+        <div class="endpoint-card" id="ep-analyze-status">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-get">GET</span>
+                <span class="ep-path">/analyze/status</span>
+                <span class="ep-desc">Statut des backends IA (Groq, OpenRouter, Ollama)</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Vérifie la disponibilité de chaque backend IA configuré (Groq, OpenRouter, Ollama), indique si l'analyse duale est active, et retourne le fournisseur de recherche web.</p>
+                <p class="ep-section-title">Réponse</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">success</span></td><td><span class="param-type">boolean</span></td><td>Au moins un backend est joignable</td></tr>
+                        <tr><td><span class="param-name">backends_active</span></td><td><span class="param-type">array</span></td><td>Liste des backends en ligne (ex: <code>["groq", "openrouter"]</code>)</td></tr>
+                        <tr><td><span class="param-name">dual_analysis</span></td><td><span class="param-type">boolean</span></td><td><code>true</code> si Groq ET OpenRouter sont actifs — fusion automatique activée</td></tr>
+                        <tr><td><span class="param-name">search_provider</span></td><td><span class="param-type">string</span></td><td><code>tavily</code> (si TAVILY_API_KEY défini) ou <code>duckduckgo</code> (gratuit)</td></tr>
+                        <tr><td><span class="param-name">groq.configured</span></td><td><span class="param-type">boolean</span></td><td>GROQ_API_KEY présent dans .env</td></tr>
+                        <tr><td><span class="param-name">groq.online</span></td><td><span class="param-type">boolean</span></td><td>API Groq accessible</td></tr>
+                        <tr><td><span class="param-name">groq.model</span></td><td><span class="param-type">string</span></td><td>Modèle Groq actif (<code>ANALYSIS_MODEL</code>)</td></tr>
+                        <tr><td><span class="param-name">groq.models</span></td><td><span class="param-type">array</span></td><td>Liste des modèles Groq disponibles</td></tr>
+                        <tr><td><span class="param-name">openrouter.configured</span></td><td><span class="param-type">boolean</span></td><td>OPENROUTER_API_KEY présent dans .env</td></tr>
+                        <tr><td><span class="param-name">openrouter.online</span></td><td><span class="param-type">boolean</span></td><td>API OpenRouter accessible</td></tr>
+                        <tr><td><span class="param-name">openrouter.model</span></td><td><span class="param-type">string</span></td><td>Modèle OpenRouter actif (<code>OPENROUTER_MODEL</code>)</td></tr>
+                        <tr><td><span class="param-name">ollama</span></td><td><span class="param-type">object</span></td><td>Statut Ollama (présent uniquement si aucune clé cloud configurée — fallback)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /recon/<id>/generate_final_report -->
+        <div class="endpoint-card" id="ep-final-report">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/recon/&lt;id&gt;/generate_final_report</span>
+                <span class="ep-desc">Générer le rapport narratif condensé via IA</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <span class="ep-badge" style="background:rgba(124,58,237,0.15);color:#7c3aed;border:1px solid rgba(124,58,237,0.25);">20/h</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">
+                    Condense les données OSINT (<code>scan_results</code>) et l'analyse IA (<code>analysis_result</code>)
+                    stockées en base pour produire un rapport narratif structuré JSON.
+                    Le rapport est enregistré dans <code>recon.final_report</code> et retourné dans la réponse.
+                    <br><br>
+                    <strong style="color:var(--primary);">Prérequis :</strong>
+                    <code>scan_results</code> ET <code>analysis_result</code> doivent être présents en base
+                    (étapes OSINT + analyse IA déjà effectuées).
+                    <br>
+                    <strong style="color:var(--primary);">Modèle IA :</strong>
+                    Groq par défaut, OpenRouter en fallback. Appel direct (pas agentique — toutes les données sont déjà disponibles).
+                    <br>
+                    <strong style="color:var(--primary);">Cache :</strong>
+                    Si <code>final_report</code> existe déjà en base, retourné immédiatement (<code>"cached": true</code>).
+                    Utiliser <code>force_regenerate: true</code> pour forcer la régénération.
+                </p>
+
+                <p class="ep-section-title">Paramètres URL</p>
+                <table class="params-table">
+                    <thead><tr><th>Paramètre</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">id</span></td><td><span class="param-type">integer</span></td><td>ID de l'enregistrement Recon</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Corps de la requête</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Requis</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">force_regenerate</span></td><td><span class="param-type">boolean</span></td><td><span class="param-optional">non</span></td><td>Forcer la régénération même si rapport déjà en BD (défaut : <code>false</code>)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Structure du rapport généré</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Résumé exécutif</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">3-5 paragraphes pour un CISO — contexte, enjeux, synthèse du niveau de risque</div>
+                    </div>
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Vue infrastructure</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">Description de l'infrastructure cible découverte lors du scan OSINT</div>
+                    </div>
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Narration des findings</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">Explication narrative des problèmes critiques et élevés dans leur contexte</div>
+                    </div>
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Recommandations priorisées</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">Actions concrètes classées par priorité, points positifs détectés, conclusion</div>
+                    </div>
+                </div>
+
+                <p class="ep-section-title">Réponse (200)</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">success</span></td><td><span class="param-type">boolean</span></td><td>Génération réussie</td></tr>
+                        <tr><td><span class="param-name">cached</span></td><td><span class="param-type">boolean</span></td><td><code>true</code> si rapport chargé depuis le cache BD</td></tr>
+                        <tr><td><span class="param-name">data.domain</span></td><td><span class="param-type">string</span></td><td>Domaine analysé</td></tr>
+                        <tr><td><span class="param-name">data.security_score</span></td><td><span class="param-type">integer</span></td><td>Score de sécurité global (0-100)</td></tr>
+                        <tr><td><span class="param-name">data.security_grade</span></td><td><span class="param-type">string</span></td><td>Grade (A+ → F)</td></tr>
+                        <tr><td><span class="param-name">data.executive_summary</span></td><td><span class="param-type">string</span></td><td>Résumé exécutif narratif</td></tr>
+                        <tr><td><span class="param-name">data.infrastructure_overview</span></td><td><span class="param-type">string</span></td><td>Description de l'infrastructure</td></tr>
+                        <tr><td><span class="param-name">data.key_findings_narrative</span></td><td><span class="param-type">string</span></td><td>Narration des findings critiques</td></tr>
+                        <tr><td><span class="param-name">data.risk_assessment</span></td><td><span class="param-type">string</span></td><td>Évaluation du risque et impact business</td></tr>
+                        <tr><td><span class="param-name">data.prioritized_recommendations</span></td><td><span class="param-type">array</span></td><td>Actions correctives prioritaires</td></tr>
+                        <tr><td><span class="param-name">data.positive_points</span></td><td><span class="param-type">array</span></td><td>Points positifs et bonnes pratiques détectés</td></tr>
+                        <tr><td><span class="param-name">data.conclusion</span></td><td><span class="param-type">string</span></td><td>Conclusion avec prochaines étapes</td></tr>
+                        <tr><td><span class="param-name">data.findings_summary</span></td><td><span class="param-type">object</span></td><td>Compteurs par sévérité (CRITICAL/HIGH/MEDIUM/LOW/INFO)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Codes de réponse</p>
+                <table class="params-table">
+                    <thead><tr><th>Code</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">200</span></td><td>Rapport généré (ou chargé depuis le cache) et enregistré en BD</td></tr>
+                        <tr><td><span class="param-name">400</span></td><td><code>scan_results</code> ou <code>analysis_result</code> absent — effectuez d'abord les étapes OSINT + analyse IA</td></tr>
+                        <tr><td><span class="param-name">404</span></td><td>Enregistrement Recon introuvable</td></tr>
+                        <tr><td><span class="param-name">429</span></td><td>Rate limit dépassé (20 requêtes/heure)</td></tr>
+                        <tr><td><span class="param-name">500</span></td><td>Erreur génération IA (modèle indisponible)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- POST /recon/<id>/generate_report -->
+        <div class="endpoint-card" id="ep-report-gen">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-post">POST</span>
+                <span class="ep-path">/recon/&lt;id&gt;/generate_report</span>
+                <span class="ep-desc">Générer, enregistrer et envoyer le rapport PDF</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <span class="ep-badge" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.25);">10/h</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">
+                    Génère un rapport PDF professionnel (logo vectoriel, couleurs sévérité, métriques), l'enregistre en base de données (<code>pdf_report BYTEA</code>) et l'envoie par email.
+                    <br><br>
+                    <strong style="color:var(--primary);">Chargement automatique :</strong> si <code>analysis</code> est absent du body, il est chargé depuis <code>recon.analysis_result</code> en BD.
+                    <br>
+                    <strong style="color:var(--primary);">Rapport narratif intégré :</strong> si <code>recon.final_report</code> existe (généré par <code>POST /generate_final_report</code>), son <code>executive_summary</code> enrichit le PDF.
+                    <br><br>
+                    <strong style="color:var(--warning);">Flux recommandé :</strong> appeler d'abord <code>POST /generate_final_report</code> pour un PDF enrichi du rapport narratif IA.
+                </p>
+
+                <p class="ep-section-title">Paramètres URL</p>
+                <table class="params-table">
+                    <thead><tr><th>Paramètre</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">id</span></td><td><span class="param-type">integer</span></td><td>ID de l'enregistrement Recon</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Corps de la requête</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Requis</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">analysis</span></td><td><span class="param-type">object</span></td><td><span class="param-optional">non</span></td><td>Champ <code>data</code> de <code>POST /analyze</code> — auto-chargé depuis BD si absent</td></tr>
+                        <tr><td><span class="param-name">send_email</span></td><td><span class="param-type">boolean</span></td><td><span class="param-optional">non</span></td><td>Envoyer le PDF par email (défaut : <code>true</code>)</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Structure du PDF généré</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Page 1 — Couverture</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">Fond sombre, logo vectoriel centré, domaine, niveau de risque, badge de score, date de génération</div>
+                    </div>
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Page 2 — Résumé exécutif</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">Grille 8 métriques, délais de traitement (scan / IA / total), données Recon (email, statut)</div>
+                    </div>
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Findings</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">Cartes color-codées par sévérité (CRITICAL / HIGH / MEDIUM / LOW / INFO) avec description et recommandation</div>
+                    </div>
+                    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0.85rem;">
+                        <div style="font-size:0.78rem;font-weight:600;color:var(--primary);margin-bottom:0.4rem;">Surface d'attaque & Recommandations</div>
+                        <div style="font-size:0.82rem;color:var(--muted2);">Sous-domaines, ports exposés, services détectés, actions prioritaires P1/P2/P3</div>
+                    </div>
+                </div>
+
+                <p class="ep-section-title">Réponse (200)</p>
+                <table class="params-table">
+                    <thead><tr><th>Champ</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">success</span></td><td><span class="param-type">boolean</span></td><td>Génération réussie</td></tr>
+                        <tr><td><span class="param-name">data.pdf_size_bytes</span></td><td><span class="param-type">integer</span></td><td>Taille du PDF en octets</td></tr>
+                        <tr><td><span class="param-name">data.pdf_generated_at</span></td><td><span class="param-type">string</span></td><td>Horodatage ISO de génération</td></tr>
+                        <tr><td><span class="param-name">data.email_sent</span></td><td><span class="param-type">boolean</span></td><td>Email envoyé avec succès</td></tr>
+                        <tr><td><span class="param-name">data.email_error</span></td><td><span class="param-type">string|null</span></td><td>Message d'erreur email (si échec)</td></tr>
+                        <tr><td><span class="param-name">data.timing</span></td><td><span class="param-type">object</span></td><td>Délais : <code>scan_duration_s</code>, <code>analysis_duration_s</code>, <code>total_duration_s</code></td></tr>
+                        <tr><td><span class="param-name">data.risk_level</span></td><td><span class="param-type">string</span></td><td>Niveau de risque (CRITICAL/HIGH/MEDIUM/LOW)</td></tr>
+                        <tr><td><span class="param-name">data.security_score</span></td><td><span class="param-type">integer</span></td><td>Score de sécurité global (0-100)</td></tr>
+                        <tr><td><span class="param-name">data.security_grade</span></td><td><span class="param-type">string</span></td><td>Grade (A+ → F)</td></tr>
+                        <tr><td><span class="param-name">data.findings_count</span></td><td><span class="param-type">integer</span></td><td>Nombre de findings détectés</td></tr>
+                        <tr><td><span class="param-name">data.has_final_report</span></td><td><span class="param-type">boolean</span></td><td><code>true</code> si le rapport narratif IA a été intégré dans le PDF</td></tr>
+                    </tbody>
+                </table>
+
+                <p class="ep-section-title">Codes de réponse</p>
+                <table class="params-table">
+                    <thead><tr><th>Code</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">200</span></td><td>PDF généré, enregistré en BD et email envoyé</td></tr>
+                        <tr><td><span class="param-name">400</span></td><td>Champ <code>analysis</code> absent en body ET en base de données</td></tr>
+                        <tr><td><span class="param-name">404</span></td><td>Enregistrement Recon introuvable</td></tr>
+                        <tr><td><span class="param-name">429</span></td><td>Rate limit dépassé (10 requêtes/heure)</td></tr>
+                        <tr><td><span class="param-name">500</span></td><td>Erreur génération PDF ou configuration email</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- GET /recon/<id>/report.pdf -->
+        <div class="endpoint-card" id="ep-report-dl">
+            <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                <span class="ep-method ep-get">GET</span>
+                <span class="ep-path">/recon/&lt;id&gt;/report.pdf</span>
+                <span class="ep-desc">Télécharger le rapport PDF généré</span>
+                <span class="ep-auth-badge"><i class="fas fa-lock"></i> Auth requise</span>
+                <i class="fas fa-chevron-down ep-chevron"></i>
+            </div>
+            <div class="endpoint-body">
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">
+                    Retourne le PDF stocké en base de données pour l'enregistrement Recon spécifié.
+                    Le PDF doit d'abord avoir été généré via <code>POST /recon/&lt;id&gt;/generate_report</code>.
+                    Le fichier est retourné en téléchargement direct (<code>Content-Disposition: attachment</code>).
+                </p>
+                <p class="ep-section-title">Paramètres URL</p>
+                <table class="params-table">
+                    <thead><tr><th>Paramètre</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">id</span></td><td><span class="param-type">integer</span></td><td>ID de l'enregistrement Recon</td></tr>
+                    </tbody>
+                </table>
+                <p class="ep-section-title">Réponses</p>
+                <table class="params-table">
+                    <thead><tr><th>Code</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="param-name">200</span></td><td>Fichier PDF (<code>application/pdf</code>), nom : <code>rapport_osint_&lt;domain&gt;_&lt;id&gt;.pdf</code></td></tr>
+                        <tr><td><span class="param-name">404</span></td><td>Enregistrement introuvable ou PDF pas encore généré</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </section>
+
+    <!-- ═══════════════════════════════════════════
+         OUTILS PASS_RECON
+    ═══════════════════════════════════════════ -->
+
+    <section class="doc-section" id="tools-dns">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-globe"></i></div>
+            <div>
+                <h2>Outils DNS & IP</h2>
+                <p>Résolution DNS, géolocalisation IP et informations réseau</p>
+            </div>
+        </div>
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-list-ul"></i></div>
+                    <span class="tool-name">dns_records</span>
+                </div>
+                <p class="tool-desc">Résout tous les types d'enregistrements DNS : A, AAAA, MX, TXT, NS, CNAME, SOA, CAA. Utilise des résolveurs publics (8.8.8.8, 1.1.1.1).</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-location-dot"></i></div>
+                    <span class="tool-name">ip_info</span>
+                </div>
+                <p class="tool-desc">Géolocalisation des IPs du domaine : pays, ville, ISP, organisation, coordonnées GPS (via ip-api.com).</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-diagram-project"></i></div>
+                    <span class="tool-name">asn_info</span>
+                </div>
+                <p class="tool-desc">Informations BGP/ASN : numéro d'AS, préfixes réseau annoncés, organisation, pays de l'AS.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-rotate-left"></i></div>
+                    <span class="tool-name">reverse_ip</span>
+                </div>
+                <p class="tool-desc">Lookup DNS inverse : trouve tous les domaines hébergés sur la même adresse IP (via hackertarget.com).</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-fingerprint"></i></div>
+                    <span class="tool-name">ptr_records</span>
+                </div>
+                <p class="tool-desc">Enregistrements PTR (reverse DNS) pour chaque IP résolue — identifie les serveurs par leur nom FQDN inverse.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-shield-virus"></i></div>
+                    <span class="tool-name">dnsbl_check</span>
+                </div>
+                <p class="tool-desc">Vérifie si les IPs du domaine sont listées dans les principales blacklists DNS (Spamhaus, Barracuda, SORBS, etc.).</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="tools-ssl">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-lock"></i></div>
+            <div>
+                <h2>Outils SSL / TLS</h2>
+                <p>Analyse des certificats et de la configuration TLS</p>
+            </div>
+        </div>
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-certificate"></i></div>
+                    <span class="tool-name">ssl_info</span>
+                </div>
+                <p class="tool-desc">Informations du certificat SSL : sujet, émetteur, dates de validité, Subject Alt Names (SANs), algorithme de signature, numéro de série.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-shield-halved"></i></div>
+                    <span class="tool-name">tls_config</span>
+                </div>
+                <p class="tool-desc">Configuration TLS : versions supportées (TLS 1.0–1.3), suites de chiffrement, HSTS, OCSP stapling, Perfect Forward Secrecy.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="tools-sub">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-sitemap"></i></div>
+            <div>
+                <h2>Outils Sous-domaines</h2>
+                <p>Énumération passive de la surface d'attaque</p>
+            </div>
+        </div>
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-satellite-dish"></i></div>
+                    <span class="tool-name">amass</span>
+                </div>
+                <p class="tool-desc">OWASP Amass en mode passif — interroge des dizaines de sources OSINT, API publiques et bases de données de certificats. Résultats les plus complets.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-search"></i></div>
+                    <span class="tool-name">subfinder</span>
+                </div>
+                <p class="tool-desc">ProjectDiscovery Subfinder — découverte rapide via crt.sh, VirusTotal, Shodan, SecurityTrails et autres sources publiques.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-binoculars"></i></div>
+                    <span class="tool-name">assetfinder</span>
+                </div>
+                <p class="tool-desc">Assetfinder (tomnomnom) — découverte légère via Facebook CT, crt.sh, hackertarget et waybackmachine.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-certificate"></i></div>
+                    <span class="tool-name">crtsh</span>
+                </div>
+                <p class="tool-desc">Requête directe sur crt.sh — extrait tous les Common Names et SANs des certificats émis pour le domaine.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fab fa-github"></i></div>
+                    <span class="tool-name">github</span>
+                </div>
+                <p class="tool-desc">github-subdomains — recherche des sous-domaines mentionnés dans les dépôts GitHub publics (nécessite GITHUB_TOKEN).</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                    <span class="tool-name">subdomain_takeover</span>
+                </div>
+                <p class="tool-desc">Détecte les sous-domaines vulnérables au takeover : CNAME pointant vers des services expirés (GitHub Pages, Heroku, S3, etc.).</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="tools-http">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-code"></i></div>
+            <div>
+                <h2>Outils HTTP & Web</h2>
+                <p>Analyse passive de la surface web</p>
+            </div>
+        </div>
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-arrows-up-down"></i></div>
+                    <span class="tool-name">http_methods</span>
+                </div>
+                <p class="tool-desc">Méthodes HTTP acceptées par le serveur (GET, POST, PUT, DELETE, OPTIONS, TRACE). Détecte les méthodes dangereuses exposées.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-route"></i></div>
+                    <span class="tool-name">redirect_chain</span>
+                </div>
+                <p class="tool-desc">Chaîne complète de redirections HTTP : chaque saut avec code de statut, URL destination et type de redirection (301/302).</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-robot"></i></div>
+                    <span class="tool-name">robots_txt</span>
+                </div>
+                <p class="tool-desc">Contenu du fichier robots.txt : directives Allow/Disallow, Sitemaps et agents. Révèle souvent des chemins sensibles.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-shield-alt"></i></div>
+                    <span class="tool-name">security_headers</span>
+                </div>
+                <p class="tool-desc">Analyse des en-têtes de sécurité HTTP : HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-layer-group"></i></div>
+                    <span class="tool-name">tech_stack</span>
+                </div>
+                <p class="tool-desc">Détection de la stack technologique : framework web, CMS, serveur HTTP, CDN, analytics, librairies JS (via en-têtes et fingerprinting).</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-fire-flame-curved"></i></div>
+                    <span class="tool-name">waf_detection</span>
+                </div>
+                <p class="tool-desc">Détecte la présence d'un WAF (Web Application Firewall) : Cloudflare, Akamai, AWS WAF, Imperva, Sucuri, etc.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-hashtag"></i></div>
+                    <span class="tool-name">favicon_hash</span>
+                </div>
+                <p class="tool-desc">Hash MurmurHash du favicon.ico pour fingerprinting de technologies et recherche sur Shodan/Fofa.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-history"></i></div>
+                    <span class="tool-name">archive_history</span>
+                </div>
+                <p class="tool-desc">Historique d'archivage Wayback Machine : premier snapshot, dernier snapshot, nombre total de captures (via CDX API).</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="tools-email">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-envelope"></i></div>
+            <div>
+                <h2>Outils Email & WHOIS</h2>
+                <p>Configuration email et informations d'enregistrement de domaine</p>
+            </div>
+        </div>
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-envelope-open-text"></i></div>
+                    <span class="tool-name">email_config</span>
+                </div>
+                <p class="tool-desc">Analyse complète de la sécurité email : MX records, SPF (Sender Policy Framework), DMARC, DKIM, BIMI, MTA-STS, DANE/TLSA.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-id-card"></i></div>
+                    <span class="tool-name">whois_info</span>
+                </div>
+                <p class="tool-desc">Informations WHOIS structurées : registrar, dates de création/expiration/mise à jour, nameservers, statut, DNSSEC, protection de la vie privée.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════
+         IA ANALYSIS
+    ═══════════════════════════════════════════ -->
+    <section class="doc-section" id="ia-analysis">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-robot"></i></div>
+            <div>
+                <h2>Analyse IA — Groq + OpenRouter (Dual)</h2>
+                <p>Double agent IA en parallèle avec fusion automatique des résultats et cache BD intelligent</p>
+            </div>
+        </div>
+
+        <!-- Backend selection info -->
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem 1.5rem;margin-bottom:1.5rem;">
+            <h4 style="color:var(--primary);margin-bottom:0.75rem;font-size:0.95rem;"><i class="fas fa-code-branch" style="margin-right:6px"></i>Architecture d'analyse duale</h4>
+            <p style="color:var(--muted2);font-size:0.88rem;line-height:1.7;margin-bottom:0.75rem;">
+                <strong>Groq</strong> et <strong>OpenRouter</strong> s'exécutent <strong>en parallèle</strong> avec des prompts complémentaires. Leurs rapports sont ensuite <strong>fusionnés</strong> : findings dédupliqués, score conservatif, couverture maximale. Si aucune clé cloud n'est définie → fallback <strong>Ollama</strong> local.
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;">
+                <div style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:8px;padding:0.85rem;">
+                    <div style="font-weight:600;color:var(--primary);margin-bottom:0.35rem;font-size:0.85rem;"><i class="fas fa-cloud" style="margin-right:5px"></i>Groq — Analyste CVE</div>
+                    <div style="font-size:0.82rem;color:var(--muted2);line-height:1.6;"><code>llama-3.3-70b-versatile</code>. Focalisé sur les <strong>menaces techniques</strong> : CVE actives, exploits publics, vecteurs d'attaque. 14 400 req/j gratuites. <a href="https://console.groq.com/keys" style="color:var(--primary);">console.groq.com</a></div>
+                </div>
+                <div style="background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:8px;padding:0.85rem;">
+                    <div style="font-weight:600;color:#a78bfa;margin-bottom:0.35rem;font-size:0.85rem;"><i class="fas fa-magnifying-glass" style="margin-right:5px"></i>OpenRouter — Auditeur complet</div>
+                    <div style="font-size:0.82rem;color:var(--muted2);line-height:1.6;"><code>qwen3-235b-a22b:free</code>. Couvre <strong>toutes les sections</strong> OSINT, documente aussi les <strong>bonnes pratiques</strong> déjà en place. Gratuit. <a href="https://openrouter.ai/keys" style="color:#a78bfa;">openrouter.ai</a></div>
+                </div>
+                <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:0.85rem;">
+                    <div style="font-weight:600;color:#10b981;margin-bottom:0.35rem;font-size:0.85rem;"><i class="fas fa-server" style="margin-right:5px"></i>Ollama — Fallback local</div>
+                    <div style="font-size:0.82rem;color:var(--muted2);line-height:1.6;">Activé uniquement si aucune clé cloud n'est définie. Modèle recommandé : <code>qwen3:8b</code> (8 Go RAM). Aucune donnée sortante.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tools-grid">
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-bolt"></i></div>
+                    <span class="tool-name">Analyse parallèle (ThreadPool)</span>
+                </div>
+                <p class="tool-desc">Groq et OpenRouter s'exécutent simultanément via <code>ThreadPoolExecutor</code>. Chaque backend dispose de sa propre boucle agentique (<code>max_search_rounds</code> tours max). Les résultats arrivent en même temps, réduisant la durée totale.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-code-merge"></i></div>
+                    <span class="tool-name">Fusion intelligente</span>
+                </div>
+                <p class="tool-desc">Le merger déduplique les findings par <code>(category, titre normalisé)</code>, prend la sévérité la plus haute en cas de doublon, unifie les <code>strengths</code> et <code>immediate_actions</code>, et calcule <code>risk_score = max(groq, openrouter)</code>.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-magnifying-glass-arrow-right"></i></div>
+                    <span class="tool-name">web_search — Anti-hallucination</span>
+                </div>
+                <p class="tool-desc">Chaque finding doit être ancré dans les données OSINT <strong>ET</strong> une source web vérifiée. Les deux agents font leurs propres recherches ciblées : CVE actives, standards OWASP/CIS, bonnes pratiques pour chaque technologie détectée.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-database"></i></div>
+                    <span class="tool-name">Cache BD avec TTL</span>
+                </div>
+                <p class="tool-desc">L'analyse fusionnée est stockée en base liée à l'enregistrement Recon. Retour instantané jusqu'à expiration du TTL (défaut 7 jours). <code>force_refresh: true</code> pour forcer la régénération.</p>
+            </div>
+            <div class="tool-card">
+                <div class="tool-card-header">
+                    <div class="tool-icon"><i class="fas fa-file-shield"></i></div>
+                    <span class="tool-name">Rapport exhaustif</span>
+                </div>
+                <p class="tool-desc"><code>risk_score</code> (0–100), <code>findings</code> avec CVE/CWE/OWASP, <code>strengths</code> (ce qui est bien configuré), <code>attack_surface</code>, <code>immediate_actions</code> P1/P2/P3. <code>_merge_details</code> pour tracer l'origine de chaque contribution.</p>
+            </div>
+        </div>
+
+        <p class="ep-section-title" style="margin-top:1.5rem;">Variables d'environnement</p>
+        <table class="params-table">
+            <thead><tr><th>Variable</th><th>Défaut</th><th>Description</th></tr></thead>
+            <tbody>
+                <tr><td><span class="param-name">GROQ_API_KEY</span></td><td>—</td><td>Clé Groq (analyste CVE/exploits). Gratuit : <a href="https://console.groq.com/keys" style="color:var(--primary);">console.groq.com</a></td></tr>
+                <tr><td><span class="param-name">ANALYSIS_MODEL</span></td><td><code>llama-3.3-70b-versatile</code></td><td>Modèle Groq. Alternatives : <code>llama-3.1-8b-instant</code> (rapide), <code>llama3-groq-70b-8192-tool-use-preview</code></td></tr>
+                <tr><td><span class="param-name">OPENROUTER_API_KEY</span></td><td>—</td><td>Clé OpenRouter (auditeur exhaustif + bonnes pratiques). Gratuit : <a href="https://openrouter.ai/keys" style="color:#a78bfa;">openrouter.ai</a></td></tr>
+                <tr><td><span class="param-name">OPENROUTER_MODEL</span></td><td><code>qwen/qwen3-235b-a22b:free</code></td><td>Modèle OpenRouter (235B paramètres, gratuit)</td></tr>
+                <tr><td><span class="param-name">ANALYSIS_BACKEND_TIMEOUT</span></td><td><code>480</code></td><td>Timeout global par backend en secondes (8 min). Dépasser ce délai → le backend est ignoré dans la fusion</td></tr>
+                <tr><td><span class="param-name">ANALYSIS_MAX_SEARCH_ROUNDS</span></td><td><code>6</code></td><td>Nombre max de cycles de recherche web <strong>par backend</strong> (chaque backend fait ses propres recherches)</td></tr>
+                <tr><td><span class="param-name">ANALYSIS_CACHE_TTL_HOURS</span></td><td><code>168</code></td><td>Durée de validité du cache analyse en heures (168 = 7 jours). Passé ce délai, nouvelle analyse automatique.</td></tr>
+                <tr><td><span class="param-name">ANALYSIS_LANG</span></td><td><code>fr</code></td><td>Langue du rapport — <code>fr</code> (français) ou <code>en</code> (anglais)</td></tr>
+                <tr><td><span class="param-name">OLLAMA_URL</span></td><td><code>http://ollama:11434</code></td><td>URL Ollama — utilisé uniquement si aucune clé cloud n'est définie (fallback)</td></tr>
+                <tr><td><span class="param-name">TAVILY_API_KEY</span></td><td>—</td><td>Clé Tavily optionnelle pour des recherches web de meilleure qualité (sinon DuckDuckGo gratuit)</td></tr>
+            </tbody>
+        </table>
+
+        <p class="ep-section-title" style="margin-top:1.5rem;">Configuration recommandée (analyse duale)</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre><span class="hl-comment"># 1. Obtenir les deux clés gratuites :</span>
+<span class="hl-comment">#    Groq       : https://console.groq.com/keys</span>
+<span class="hl-comment">#    OpenRouter : https://openrouter.ai/keys</span>
+
+<span class="hl-comment"># 2. Ajouter dans api/.env :</span>
+GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+ANALYSIS_MODEL=llama-3.3-70b-versatile
+
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxx
+OPENROUTER_MODEL=qwen/qwen3-235b-a22b:free
+
+ANALYSIS_CACHE_TTL_HOURS=168
+ANALYSIS_MAX_SEARCH_ROUNDS=6
+
+<span class="hl-comment"># 3. Rebuilder le conteneur (nouvelle dépendance openai)</span>
+docker-compose up -d --build api
+
+<span class="hl-comment"># 4. Vérifier que les deux backends sont actifs</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> https://api.idachallenge.bj/analyze/status
+<span class="hl-comment"># → "dual_analysis": true, "backends_active": ["groq", "openrouter"]</span></pre>
+        </div>
+
+        <p class="ep-section-title" style="margin-top:1.25rem;">Sécurité</p>
+        <div style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:1rem 1.25rem;">
+            <ul style="color:var(--muted2);font-size:0.87rem;line-height:2.1;list-style:none;padding:0;">
+                <li><i class="fas fa-shield-halved" style="color:#ef4444;margin-right:6px"></i>Authentification HTTP Basic obligatoire sur tous les endpoints IA</li>
+                <li><i class="fas fa-gauge-high" style="color:#f59e0b;margin-right:6px"></i>Rate limiting : <strong>5 requêtes/heure</strong> par IP sur <code>/analyze</code></li>
+                <li><i class="fas fa-check-circle" style="color:#10b981;margin-right:6px"></i>Noms de modèle validés par regex stricte (<code>[a-zA-Z0-9._:/-]</code>, 80 chars max — inclut <code>/</code> pour les modèles OpenRouter)</li>
+                <li><i class="fas fa-cut" style="color:#00d4ff;margin-right:6px"></i>Queries de recherche web limitées à 300 caractères</li>
+                <li><i class="fas fa-eye-slash" style="color:#7c3aed;margin-right:6px"></i>Clés <code>GROQ_API_KEY</code> et <code>OPENROUTER_API_KEY</code> jamais exposées dans les réponses ni les logs</li>
+                <li><i class="fas fa-database" style="color:#a78bfa;margin-right:6px"></i>Cache BD : évite les appels répétés inutiles à l'IA, réduit la consommation de tokens</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════
+         WORKFLOW
+    ═══════════════════════════════════════════ -->
+    <section class="doc-section" id="workflow">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-diagram-project"></i></div>
+            <div>
+                <h2>Workflow complet</h2>
+                <p>Du formulaire utilisateur aux résultats OSINT</p>
+            </div>
+        </div>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <h4>Soumission du formulaire</h4>
+                    <p>L'utilisateur soumet son domaine et son email via <code>POST /recon</code>. Un OTP à 6 chiffres est envoyé par email (valable 10 min).</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <h4>Vérification email</h4>
+                    <p>L'utilisateur valide son email via <code>POST /verify_email</code> avec le code OTP. L'enregistrement passe en statut <code>pending</code>.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <h4>Déclenchement n8n</h4>
+                    <p>Un webhook n8n est déclenché automatiquement. n8n appelle <code>POST /pass_recon</code> avec le domaine pour lancer l'analyse OSINT.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">4</div>
+                <div class="step-content">
+                    <h4>Analyse OSINT</h4>
+                    <p>Plus de 20 outils OSINT s'exécutent en parallèle (DNS, SSL, sous-domaines, HTTP, email, WHOIS). Les résultats sont mis en cache 24h.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">5</div>
+                <div class="step-content">
+                    <h4>Analyse IA duale</h4>
+                    <p>n8n appelle <code>POST /analyze</code> avec le JSON de <code>/pass_recon</code> et le <code>recon_id</code>. <strong>Groq</strong> et <strong>OpenRouter</strong> s'exécutent en parallèle : Groq identifie les CVE et vecteurs d'attaque, OpenRouter audite toutes les sections et documente les bonnes pratiques. Les deux rapports sont fusionnés automatiquement. Le résultat est mis en cache en BD — les appels suivants sont instantanés tant que le cache n'a pas expiré (<code>ANALYSIS_CACHE_TTL_HOURS</code>, défaut 7 jours).</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">6</div>
+                <div class="step-content">
+                    <h4>Persistance des résultats</h4>
+                    <p>n8n appelle <code>PATCH /recon/&lt;id&gt;/result</code> pour enregistrer les résultats OSINT bruts et le rapport IA en base de données.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">7</div>
+                <div class="step-content">
+                    <h4>Rapport final narratif IA</h4>
+                    <p>n8n appelle <code>POST /recon/&lt;id&gt;/generate_final_report</code>. L'IA (Groq par défaut) condense les données OSINT + l'analyse en un rapport narratif structuré (résumé exécutif, vue infrastructure, narration des findings, recommandations priorisées). Stocké dans <code>recon.final_report</code>. Mis en cache — les appels suivants sont instantanés (<code>"cached": true</code>).</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">8</div>
+                <div class="step-content">
+                    <h4>Génération du rapport PDF</h4>
+                    <p>n8n appelle <code>POST /recon/&lt;id&gt;/generate_report</code>. L'analyse est chargée automatiquement depuis la BD (<code>analysis_result</code>). Si <code>final_report</code> existe, son executive summary enrichit le PDF. Le PDF est enregistré en base (<code>pdf_report BYTEA</code>) et envoyé par email.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">9</div>
+                <div class="step-content">
+                    <h4>Téléchargement</h4>
+                    <p>Le rapport PDF est consultable à tout moment via <code>GET /recon/&lt;id&gt;/report.pdf</code> (authentifié). Il est stocké en base de données (<code>pdf_report BYTEA</code>).</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════
+         EXEMPLES cURL
+    ═══════════════════════════════════════════ -->
+    <section class="doc-section" id="examples">
+        <div class="section-header">
+            <div class="section-icon"><i class="fas fa-terminal"></i></div>
+            <div>
+                <h2>Exemples cURL</h2>
+                <p>Requêtes prêtes à l'emploi</p>
+            </div>
+        </div>
+
+        <p class="ep-section-title">1. Authentification</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre>curl -X POST https://api.idachallenge.bj/auth/login \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{<span class="hl-key">"email"</span>:<span class="hl-str">"admin@example.com"</span>,<span class="hl-key">"password"</span>:<span class="hl-str">"motdepasse"</span>}'</pre>
+        </div>
+
+        <p class="ep-section-title">2. Lancer un scan complet</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre>curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/pass_recon \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{<span class="hl-key">"domain"</span>:<span class="hl-str">"example.com"</span>}'</pre>
+        </div>
+
+        <p class="ep-section-title">3. Scan sélectif (DNS + SSL uniquement)</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre>curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/pass_recon \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{
+    <span class="hl-key">"domain"</span>: <span class="hl-str">"example.com"</span>,
+    <span class="hl-key">"tools"</span>: [<span class="hl-str">"dns_records"</span>, <span class="hl-str">"ssl_info"</span>, <span class="hl-str">"tls_config"</span>]
+  }'</pre>
+        </div>
+
+        <p class="ep-section-title">4. Crawler une URL</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre>curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/crawl \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{
+    <span class="hl-key">"url"</span>: <span class="hl-str">"https://example.com"</span>,
+    <span class="hl-key">"options"</span>: [<span class="hl-str">"--depth"</span>, <span class="hl-str">"2"</span>, <span class="hl-str">"--threads"</span>, <span class="hl-str">"5"</span>]
+  }'</pre>
+        </div>
+
+        <p class="ep-section-title">5. Analyse IA duale d'un rapport OSINT (Groq + OpenRouter + cache BD)</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre><span class="hl-comment"># Vérifier les backends IA (Groq + OpenRouter)</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  https://api.idachallenge.bj/analyze/status
+<span class="hl-comment"># → "dual_analysis": true, "backends_active": ["groq", "openrouter"]</span>
+
+<span class="hl-comment"># Première analyse — Groq + OpenRouter en parallèle, fusion, sauvegarde cache BD</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/analyze \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{
+    <span class="hl-key">"recon_json"</span>: { <span class="hl-comment">/* JSON retourné par /pass_recon */</span> },
+    <span class="hl-key">"recon_id"</span>: 42,
+    <span class="hl-key">"max_search_rounds"</span>: 6
+  }'
+<span class="hl-comment"># → "model_used": "groq+openrouter (merged)", "_merge_details": { ... }</span>
+
+<span class="hl-comment"># Appel suivant (dans les 7 jours) → retour instantané depuis le cache</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/analyze \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{ <span class="hl-key">"recon_json"</span>: {...}, <span class="hl-key">"recon_id"</span>: 42 }'
+<span class="hl-comment"># → "cached": true, "_cache": { "expires_in_h": 143.2 }</span>
+
+<span class="hl-comment"># Forcer une nouvelle analyse (ignorer le cache)</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/analyze \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{ <span class="hl-key">"recon_json"</span>: {...}, <span class="hl-key">"recon_id"</span>: 42, <span class="hl-key">"force_refresh"</span>: true }'</pre>
+        </div>
+
+        <p class="ep-section-title">6. Générer le rapport final narratif IA</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre><span class="hl-comment"># Condensation IA (OSINT + analyse) → rapport narratif stocké dans recon.final_report</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/recon/42/generate_final_report \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{ <span class="hl-key">"force_regenerate"</span>: false }'
+<span class="hl-comment"># → "cached": false, "data": { "executive_summary": "...", "prioritized_recommendations": [...], ... }</span>
+
+<span class="hl-comment"># Appel suivant → retour instantané depuis le cache</span>
+<span class="hl-comment"># → "cached": true</span></pre>
+        </div>
+
+        <p class="ep-section-title">7. Générer et envoyer le rapport PDF</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre><span class="hl-comment"># Génération PDF — analysis chargé automatiquement depuis la BD</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  -X POST https://api.idachallenge.bj/recon/42/generate_report \
+  -H <span class="hl-str">"Content-Type: application/json"</span> \
+  -d '{ <span class="hl-key">"send_email"</span>: <span class="hl-str">true</span> }'
+<span class="hl-comment"># → "has_final_report": true, "security_score": 72, "security_grade": "C+"</span></pre>
+        </div>
+
+        <p class="ep-section-title">8. Télécharger le rapport PDF</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre><span class="hl-comment"># Télécharger le PDF généré pour le recon ID 42</span>
+curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  https://api.idachallenge.bj/recon/42/report.pdf \
+  -o rapport_osint.pdf</pre>
+        </div>
+
+        <p class="ep-section-title">9. Consulter les logs d'audit</p>
+        <div class="code-block">
+            <div class="code-block-header"><span class="code-lang">bash</span><button class="code-copy" onclick="copyCode(this)"><i class="fas fa-copy"></i> Copier</button></div>
+            <pre>curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> \
+  https://api.idachallenge.bj/logs?page=1&amp;per_page=50</pre>
+        </div>
+    </section>
+
+</main>
+</div>
+
+<!-- ══════════════════════════════════════════
+     FOOTER
+══════════════════════════════════════════ -->
+<footer>
+    <p style="color:#475569; font-size:0.8rem;">© 2026 Recon IA — <span style="font-family:var(--mono)">idachallenge.bj</span> — Tous droits réservés.</p>
+    <ul class="footer-links">
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="index.html#features">Fonctionnalités</a></li>
+        <li><a href="index.html#faq">FAQ</a></li>
+        <li><a href="mailto:contact@idachallenge.bj">Contact</a></li>
+    </ul>
+</footer>
+
+<script>
+    /* ── Accordéon endpoints ── */
+    function toggleEndpoint(header) {
+        const body = header.nextElementSibling;
+        const chevron = header.querySelector('.ep-chevron');
+        const isOpen = body.classList.contains('open');
+        body.classList.toggle('open', !isOpen);
+        chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+    }
+
+    /* ── Copie de code ── */
+    function copyCode(btn) {
+        const pre = btn.closest('.code-block').querySelector('pre');
+        navigator.clipboard.writeText(pre.innerText).then(() => {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-check"></i> Copié !';
+            btn.style.color = '#10b981';
+            setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 2000);
+        });
+    }
+
+    /* ── Filtre sidebar ── */
+    function filterSidebar(query) {
+        const q = query.toLowerCase().trim();
+        document.querySelectorAll('.sidebar-link').forEach(link => {
+            const text = link.textContent.toLowerCase();
+            link.style.display = (!q || text.includes(q)) ? '' : 'none';
+        });
+    }
+
+    /* ── Highlight lien actif sidebar au scroll ── */
+    const sections = document.querySelectorAll('[id]');
+    const sidebarLinks = document.querySelectorAll('.sidebar-link');
+
+    const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                sidebarLinks.forEach(l => l.classList.remove('active'));
+                const active = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
+                if (active) active.classList.add('active');
+            }
+        });
+    }, { rootMargin: '-70px 0px -70% 0px' });
+
+    sections.forEach(s => observer.observe(s));
+
+    /* ── Fermer sidebar mobile au clic sur lien ── */
+    sidebarLinks.forEach(link => {
+        link.addEventListener('click', () => {
+            if (window.innerWidth < 900) {
+                document.querySelector('aside').classList.remove('open');
+            }
+        });
+    });
+</script>
+</body>
+</html>

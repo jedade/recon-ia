@@ -1,2 +1,71 @@
-flask 
-python-whois
+# ============================================================
+# OSINT API — Dépendances Python
+# ============================================================
+# Installation : pip install -r requirements.txt
+# Docker       : voir Dockerfile (installe aussi les outils OSINT CLI)
+# ============================================================
+
+# --- Framework Web ---
+flask>=3.0.0
+flask-cors>=4.0.0
+flask-sqlalchemy>=3.1.0
+flask-limiter>=3.5.0
+flasgger>=0.9.7
+
+# --- Serveur WSGI de production ---
+# Le serveur de développement Flask est mono-processus et explicitement
+# déconseillé en production (pas de gestion de charge, ni de robustesse).
+gunicorn>=21.2.0
+
+# --- Rate limiting partagé (stockage Redis de Flask-Limiter) ---
+# Sans ce client, storage_uri=redis://... échoue au démarrage.
+redis>=5.0.0
+
+# --- Base de données ---
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9         # PostgreSQL (prod)
+# sqlite3 est inclus dans Python stdlib (tests)
+
+# --- Utilitaires Flask ---
+python-dotenv>=1.0.0
+werkzeug>=3.0.0
+
+# --- HTTP / Scraping ---
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# --- OSINT Python (exécutables via pip, pas seulement CLI) ---
+dnsrecon>=0.10.1                # Reconnaissance DNS avancée
+dnstwist>=20240506               # Typosquatting / phishing (outil typosquatting)
+
+# --- Sécurité / Crypto ---
+pyopenssl>=24.0.0
+cryptography>=42.0.0
+
+# --- DNS ---
+dnspython>=2.6.0
+
+# --- Parsing / Formats ---
+xmltodict>=0.13.0               # Parsing XML → dict (sslscan output)
+lxml>=5.0.0                     # Parser HTML/XML rapide
+
+# --- WHOIS ---
+python-whois>=0.9.4
+
+# --- Typing ---
+typing_extensions>=4.9.0
+
+# --- Génération PDF ---
+reportlab>=4.0.0
+
+# --- IA Analysis (Groq + OpenRouter + Ollama local + recherche web) ---
+groq>=0.9.0                    # Client Groq (LLM cloud rapide, gratuit)
+openai>=1.0.0                  # SDK OpenAI-compatible (utilisé pour OpenRouter)
+ddgs>=0.7.0                    # Recherche web DuckDuckGo (nouveau nom de duckduckgo-search)
+# duckduckgo-search            # Ancien nom — conservé pour compatibilité si ddgs absent
+# tavily-python                # Optionnel — meilleure qualité si TAVILY_API_KEY défini
+
+# --- Tests ---
+pytest>=8.0.0
+pytest-flask>=1.3.0
+pytest-cov>=4.1.0

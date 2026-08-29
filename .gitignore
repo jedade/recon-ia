@@ -192,3 +192,23 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Recon-IA — données de services locaux, backups et artefacts générés
+n8n_certs/
+certbot/conf/
+n8n_data/
+ollama/
+qdrant_data/
+postgres_data/
+n8n-backup.tar.gz
+web/*.pdf
+# Généré à chaque démarrage du conteneur `web` par envsubst depuis
+# web/templates/config.js.template (DASHBOARD_API_BASE) — jamais la source.
+web/config.js
+
+# macOS
+.DS_Store
+
+# Fichiers de travail/expérimentation ponctuels, jamais destinés au dépôt
+api/scratch_experiment.py
+api/experiment_results.json

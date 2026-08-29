@@ -1,0 +1,2177 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recon IA — Dashboard</title>
+
+    <!-- connect-src autorise http: en plus de https: — DASHBOARD_API_BASE (voir
+         config.js / CLAUDE.md) peut pointer vers une API locale en clair
+         (http://localhost:8080) pendant qu'on développe ; en prod, seule une
+         URL https réelle est configurée de toute façon. -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com;
+        font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:;
+        img-src 'self' data: https:;
+        connect-src 'self' http: https:;
+        frame-ancestors 'none';
+        base-uri 'self';
+        form-action 'none';
+    ">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="robots" content="noindex, nofollow">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+
+    <style>
+        :root {
+            --bg:        #020817;
+            --bg2:       #060f1e;
+            --card:      rgba(8, 18, 36, 0.97);
+            --border:    rgba(0, 212, 255, 0.18);
+            --border2:   rgba(0, 212, 255, 0.08);
+            --cyan:      #00d4ff;
+            --cyan-dim:  rgba(0, 212, 255, 0.12);
+            --green:     #00ff88;
+            --purple:    #7c3aed;
+            --red:       #f43f5e;
+            --orange:    #f59e0b;
+            --text:      #cbd5e1;
+            --text-dim:  #64748b;
+            --text-bright: #e2e8f0;
+            --radius:    12px;
+            --transition: all 0.25s ease;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(ellipse at 20% 0%, #0d1b2a 0%, #020817 55%, #0a0f1e 100%);
+            background-attachment: fixed;
+            color: var(--text);
+            min-height: 100vh;
+            font-size: 14px;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                linear-gradient(rgba(0, 212, 255, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 212, 255, 0.04) 1px, transparent 1px);
+            background-size: 44px 44px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ── LOGIN ─────────────────────────────────────────── */
+        #login-screen {
+            position: fixed; inset: 0; display: flex;
+            align-items: center; justify-content: center;
+            z-index: 100;
+            background: radial-gradient(ellipse at 20% 0%, #0d1b2a 0%, #020817 55%, #0a0f1e 100%);
+        }
+        .login-card {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 20px; padding: 2.5rem;
+            width: 100%; max-width: 420px;
+            box-shadow: 0 0 60px rgba(0,212,255,0.08), 0 30px 60px rgba(0,0,0,0.5);
+        }
+        .login-logo { text-align: center; margin-bottom: 2rem; }
+        .login-logo .icon-wrap {
+            width: 64px; height: 64px; border-radius: 16px;
+            background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(124,58,237,0.2));
+            border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.75rem; color: var(--cyan); margin: 0 auto 1rem;
+        }
+        .login-logo h1 { font-size: 1.5rem; font-weight: 700; color: var(--text-bright); }
+        .login-logo p  { font-size: 0.82rem; color: var(--text-dim); margin-top: 0.25rem; }
+        .form-group    { margin-bottom: 1.25rem; }
+        .form-label    { display: block; font-size: 0.78rem; font-weight: 600;
+                          color: var(--text-dim); margin-bottom: 0.4rem; letter-spacing: 0.05em; }
+        .input-wrap    { position: relative; }
+        .input-wrap i  { position: absolute; left: 0.9rem; top: 50%; transform: translateY(-50%);
+                          color: var(--text-dim); font-size: 0.85rem; pointer-events: none; }
+        .form-input {
+            width: 100%; padding: 0.7rem 1rem 0.7rem 2.5rem;
+            background: rgba(2,8,23,0.8); border: 1px solid rgba(0,212,255,0.2);
+            border-radius: 8px; color: var(--text-bright); font-family: 'Inter', sans-serif;
+            font-size: 0.88rem; transition: border-color 0.2s;
+        }
+        .form-input:focus { outline: none; border-color: var(--cyan); }
+        .btn-login {
+            width: 100%; padding: 0.8rem;
+            background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(124,58,237,0.15));
+            border: 1px solid var(--border); border-radius: 8px;
+            color: var(--cyan); font-family: 'Inter', sans-serif;
+            font-size: 0.88rem; font-weight: 600; cursor: pointer;
+            transition: var(--transition); display: flex; align-items: center;
+            justify-content: center; gap: 0.5rem;
+        }
+        .btn-login:hover { background: rgba(0,212,255,0.2); transform: translateY(-1px); }
+        .login-error {
+            display: none; margin-top: 1rem; padding: 0.6rem 0.9rem;
+            background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.25);
+            border-radius: 6px; color: var(--red); font-size: 0.8rem;
+        }
+
+        /* ── LAYOUT ────────────────────────────────────────── */
+        #dashboard { display: none; position: relative; z-index: 1; }
+        .dash-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 2rem; height: 60px; border-bottom: 1px solid var(--border2);
+            background: rgba(6,15,30,0.97); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 20;
+        }
+        .dash-logo { display: flex; align-items: center; gap: 0.65rem;
+                      font-size: 0.95rem; font-weight: 700; color: var(--text-bright); }
+        .dash-logo i { color: var(--cyan); font-size: 1.1rem; }
+        .dash-actions { display: flex; align-items: center; gap: 0.6rem; }
+        .api-badge {
+            font-family: 'Fira Code', monospace; font-size: 0.72rem;
+            padding: 0.2rem 0.65rem; background: rgba(0,212,255,0.06);
+            border: 1px solid var(--border2); border-radius: 4px; color: var(--text-dim);
+        }
+        .btn-icon {
+            padding: 0.4rem 0.85rem;
+            background: rgba(0,212,255,0.07); border: 1px solid rgba(0,212,255,0.18);
+            border-radius: 6px; color: var(--text); font-size: 0.78rem;
+            font-family: 'Inter', sans-serif; cursor: pointer; transition: var(--transition);
+            display: flex; align-items: center; gap: 0.35rem;
+        }
+        .btn-icon:hover { background: rgba(0,212,255,0.14); color: var(--cyan); }
+        .btn-icon.active { background: rgba(0,212,255,0.18); color: var(--cyan); }
+        .dash-tabs {
+            display: flex; border-bottom: 1px solid var(--border);
+            background: rgba(6,15,30,0.97); padding: 0 2rem;
+            position: sticky; top: 60px; z-index: 19; backdrop-filter: blur(8px);
+        }
+        .dash-tab {
+            padding: 0.85rem 1.5rem; font-size: 0.82rem; font-weight: 600;
+            color: var(--text-dim); cursor: pointer; border: none; background: none;
+            border-bottom: 2px solid transparent; transition: var(--transition);
+            display: flex; align-items: center; gap: 0.5rem;
+            user-select: none; font-family: 'Inter', sans-serif;
+        }
+        .dash-tab:hover { color: var(--text-bright); }
+        .dash-tab.metier.active { color: var(--green); border-bottom-color: var(--green); }
+        .dash-tab.tech.active   { color: var(--cyan);  border-bottom-color: var(--cyan); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .dash-main { padding: 1.5rem 2rem; max-width: 1600px; margin: 0 auto; }
+
+        /* ── BANDEAU MÉTHODOLOGIE ────────────────────────── */
+        .methodology-banner {
+            display: flex; align-items: flex-start; gap: 0.6rem;
+            background: rgba(0,212,255,0.05); border: 1px solid var(--border2);
+            border-left: 3px solid var(--cyan);
+            border-radius: var(--radius); padding: 0.7rem 1rem;
+            margin-bottom: 1.25rem;
+            font-size: 0.78rem; color: var(--text-dim); line-height: 1.5;
+        }
+        .methodology-banner i { color: var(--cyan); margin-top: 2px; flex-shrink: 0; }
+        .methodology-banner strong { color: var(--text); font-weight: 600; }
+
+        /* ── DONNÉES BRUTES PAR OUTIL (modale) ───────────── */
+        .tool-raw { border: 1px solid var(--border2); border-radius: 6px; margin-bottom: 6px; }
+        .tool-raw > summary {
+            cursor: pointer; padding: 0.5rem 0.7rem; display: flex; flex-wrap: wrap;
+            align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--text);
+            list-style: none;
+        }
+        .tool-raw > summary::-webkit-details-marker { display: none; }
+        .tool-raw > summary::before { content: '▸'; color: var(--cyan); font-size: 0.7rem; }
+        .tool-raw[open] > summary::before { content: '▾'; }
+        .tool-raw > summary:hover { background: rgba(0,212,255,0.04); }
+        .tool-key {
+            font-family: 'Fira Code', monospace; color: var(--cyan); font-size: 0.74rem;
+        }
+        .tool-cat { color: var(--text-dim); font-size: 0.7rem; }
+        .tool-raw pre {
+            margin: 0; padding: 0.65rem 0.8rem; background: rgba(2,8,23,0.7);
+            border-top: 1px solid var(--border2);
+            font-family: 'Fira Code', monospace; font-size: 0.7rem; line-height: 1.5;
+            color: var(--text-dim); white-space: pre-wrap; word-break: break-word;
+            max-height: 320px; overflow: auto;
+        }
+        .tool-status-ok    { color: var(--green); }
+        .tool-status-warn  { color: var(--orange); }
+        .tool-status-err   { color: var(--red); }
+        .raw-truncated {
+            display: block; margin-top: 0.4rem; color: var(--text-dim);
+            font-style: italic; font-size: 0.68rem;
+        }
+
+        /* ── FINDINGS (modale) ───────────────────────────── */
+        .finding-item {
+            border: 1px solid var(--border2); border-radius: 6px;
+            padding: 0.6rem 0.75rem; margin-bottom: 6px;
+        }
+        .finding-head {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+            margin-bottom: 0.35rem;
+        }
+        .finding-title { font-size: 0.8rem; color: var(--text); font-weight: 600; }
+        .finding-desc { font-size: 0.75rem; color: var(--text-dim); line-height: 1.5; }
+        .src-tool-badge {
+            font-family: 'Fira Code', monospace; font-size: 0.66rem;
+            background: rgba(0,212,255,0.1); border: 1px solid var(--border);
+            color: var(--cyan); padding: 1px 6px; border-radius: 4px;
+        }
+        /* Contrôle d'ancrage (grounding check) — voir utils/grounding_check.py */
+        .grounding-badge {
+            font-size: 0.66rem; padding: 1px 6px; border-radius: 4px;
+            border: 1px solid transparent; white-space: nowrap;
+        }
+        .grounding-badge.verified            { background: rgba(34,197,94,0.12);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
+        .grounding-badge.evidence_not_found  { background: rgba(244,63,94,0.12);  color: #f43f5e; border-color: rgba(244,63,94,0.3); }
+        .grounding-badge.unknown_tool        { background: rgba(244,63,94,0.12);  color: #f43f5e; border-color: rgba(244,63,94,0.3); }
+        .grounding-badge.tool_not_successful { background: rgba(245,158,11,0.12); color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+        .grounding-badge.no_source_cited     { background: rgba(148,163,184,0.12); color: #94a3b8; border-color: rgba(148,163,184,0.3); }
+        .grounding-badge.no_evidence_text    { background: rgba(148,163,184,0.12); color: #94a3b8; border-color: rgba(148,163,184,0.3); }
+
+        /* ── STATS GRID ──────────────────────────────────── */
+        /* Max 4 cartes par ligne (demande explicite) — un compte fixe de
+           colonnes plutôt que auto-fit garantit que la 5e carte et suivantes
+           passent proprement à la ligne, quelle que soit la largeur d'écran,
+           au lieu de s'étirer pour remplir une dernière ligne incomplète. */
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 0.85rem; margin-bottom: 1.5rem;
+        }
+        @media (max-width: 1100px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        .stat-card {
+            background: var(--card); border: 1px solid var(--border2); border-radius: var(--radius);
+            padding: 1rem 1.25rem; display: flex; align-items: center; gap: 1rem;
+            transition: border-color 0.2s;
+        }
+        .stat-card:hover { border-color: var(--border); }
+        .stat-icon {
+            width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 1rem;
+        }
+        .stat-icon.cyan   { background: rgba(0,212,255,0.12);   color: var(--cyan);   }
+        .stat-icon.green  { background: rgba(0,255,136,0.12);   color: var(--green);  }
+        .stat-icon.orange { background: rgba(245,158,11,0.12);  color: var(--orange); }
+        .stat-icon.red    { background: rgba(244,63,94,0.12);   color: var(--red);    }
+        .stat-icon.purple { background: rgba(124,58,237,0.12);  color: #a78bfa;       }
+        .stat-icon.blue   { background: rgba(99,102,241,0.12);  color: #818cf8;       }
+        .stat-value { font-size: 1.45rem; font-weight: 700; color: var(--text-bright); line-height: 1; }
+        .stat-label { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.3rem;
+                       text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* ── CARD ────────────────────────────────────────── */
+        .logs-card {
+            background: var(--card); border: 1px solid var(--border2);
+            border-radius: var(--radius); overflow: hidden; margin-bottom: 1.5rem;
+        }
+        .logs-header {
+            padding: 0.9rem 1.25rem; border-bottom: 1px solid var(--border2);
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 0.5rem;
+        }
+        .logs-title {
+            font-size: 0.8rem; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .logs-title i { color: var(--cyan); }
+        .logs-filters { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+        .filter-select {
+            background: rgba(2,8,23,0.8); border: 1px solid rgba(0,212,255,0.2);
+            border-radius: 6px; color: var(--text); padding: 0.35rem 0.65rem;
+            font-family: 'Inter', sans-serif; font-size: 0.8rem; cursor: pointer;
+        }
+        .filter-select:focus { outline: none; border-color: var(--cyan); }
+        .filter-input {
+            background: rgba(2,8,23,0.8); border: 1px solid rgba(0,212,255,0.2);
+            border-radius: 6px; color: var(--text); padding: 0.35rem 0.75rem;
+            font-family: 'Fira Code', monospace; font-size: 0.78rem;
+            width: 180px; transition: border-color 0.2s;
+        }
+        .filter-input:focus { outline: none; border-color: var(--cyan); }
+        .filter-input::placeholder { color: var(--text-dim); }
+
+        /* ── TABLE ───────────────────────────────────────── */
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        thead { background: rgba(0,212,255,0.04); }
+        th {
+            padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem;
+            font-weight: 600; color: var(--text-dim); text-transform: uppercase;
+            letter-spacing: 0.06em; white-space: nowrap; border-bottom: 1px solid var(--border2);
+        }
+        td {
+            padding: 0.65rem 1rem; font-size: 0.82rem; color: var(--text);
+            border-bottom: 1px solid rgba(0,212,255,0.04);
+            white-space: nowrap; font-family: 'Fira Code', monospace;
+        }
+        tr:hover td { background: rgba(0,212,255,0.025); }
+
+        /* ── BADGES ──────────────────────────────────────── */
+        .badge {
+            display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
+            border-radius: 5px; font-size: 0.72rem; font-weight: 600;
+            font-family: 'Fira Code', monospace;
+        }
+        .badge-method-GET    { background: rgba(0,212,255,0.1);  color: var(--cyan);   }
+        .badge-method-POST   { background: rgba(0,255,136,0.1);  color: var(--green);  }
+        .badge-method-PUT    { background: rgba(245,158,11,0.1); color: var(--orange); }
+        .badge-method-PATCH  { background: rgba(124,58,237,0.1); color: #a78bfa;       }
+        .badge-method-DELETE { background: rgba(244,63,94,0.1);  color: var(--red);    }
+        .badge-2xx { background: rgba(0,255,136,0.1);  color: var(--green);  }
+        .badge-3xx { background: rgba(0,212,255,0.1);  color: var(--cyan);   }
+        .badge-4xx { background: rgba(245,158,11,0.1); color: var(--orange); }
+        .badge-5xx { background: rgba(244,63,94,0.1);  color: var(--red);    }
+        .badge-pending { background: rgba(100,116,139,0.15); color: #94a3b8;      border: 1px solid rgba(100,116,139,0.2); }
+        .badge-running { background: rgba(0,212,255,0.12);   color: var(--cyan);  border: 1px solid rgba(0,212,255,0.25); }
+        .badge-success { background: rgba(0,255,136,0.12);   color: var(--green); border: 1px solid rgba(0,255,136,0.2);  }
+        .badge-failed  { background: rgba(244,63,94,0.12);   color: var(--red);   border: 1px solid rgba(244,63,94,0.2);  }
+
+        /* Grade colors */
+        .grade-A  { color: #00ff88; }
+        .grade-B  { color: #00d4ff; }
+        .grade-C  { color: #f59e0b; }
+        .grade-D  { color: #f97316; }
+        .grade-E, .grade-F { color: #f43f5e; }
+
+        /* ── CHARTS ──────────────────────────────────────── */
+        .charts-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 1rem; margin-bottom: 1.5rem; }
+        .chart-card {
+            background: var(--card); border: 1px solid var(--border2);
+            border-radius: var(--radius); padding: 1.25rem;
+        }
+        .chart-title {
+            font-size: 0.78rem; font-weight: 700; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 6px; margin-bottom: 1rem;
+        }
+        .chart-title i { color: var(--cyan); }
+        .chart-wrap { height: 200px; position: relative; }
+
+        /* ── FOOTER ──────────────────────────────────────── */
+        .logs-footer {
+            padding: 0.75rem 1.25rem; border-top: 1px solid var(--border2);
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 0.78rem; color: var(--text-dim); flex-wrap: wrap; gap: 0.5rem;
+        }
+        .logs-footer .btn-icon { padding: 0.3rem 0.6rem; font-size: 0.78rem; }
+        .logs-footer .btn-icon:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+
+        /* ── MISC ────────────────────────────────────────── */
+        .empty-state { padding: 3rem; text-align: center; color: var(--text-dim); }
+        .empty-state i { font-size: 2rem; margin-bottom: 0.75rem; display: block; color: var(--border); }
+        .loading-spinner {
+            display: inline-block; width: 18px; height: 18px;
+            border: 2px solid var(--border2); border-top-color: var(--cyan);
+            border-radius: 50%; animation: spin 0.7s linear infinite;
+            vertical-align: middle; margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .refresh-dot {
+            display: inline-block; width: 7px; height: 7px;
+            background: var(--green); border-radius: 50%;
+            box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .errors-list { display: flex; flex-direction: column; gap: 0.5rem; }
+        .error-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.5rem 0.75rem; background: rgba(244,63,94,0.05);
+            border: 1px solid rgba(244,63,94,0.12); border-radius: 6px;
+            font-size: 0.8rem; gap: 1rem;
+        }
+        .error-ep { font-family: 'Fira Code', monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+        .error-count { font-weight: 700; color: var(--red); white-space: nowrap; }
+        .td-launcher { font-family: 'Inter', sans-serif !important; line-height: 1.3; }
+        .td-launcher .name { color: var(--text-bright); font-size: 0.83rem; }
+        .td-launcher .email-small { color: var(--text-dim); font-size: 0.73rem; }
+        .section-separator {
+            display: flex; align-items: center; gap: 1rem; margin: 2.25rem 0 1.25rem;
+        }
+        .section-separator.first { margin-top: 0; }
+        .section-sep-title {
+            font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.10em; white-space: nowrap;
+            display: flex; align-items: center; gap: 8px; color: var(--text-dim);
+        }
+        .section-sep-line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
+        .section-badge { padding: 0.2rem 0.55rem; border-radius: 4px; font-size: 0.65rem; font-weight: 700; font-family: 'Fira Code', monospace; letter-spacing: 0.06em; }
+        .section-badge.metier { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.2); }
+        .section-badge.tech   { background: rgba(0,212,255,0.1); color: var(--cyan);  border: 1px solid rgba(0,212,255,0.2); }
+
+        /* ── SCORE PILL ──────────────────────────────────── */
+        .score-pill {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.78rem; font-weight: 700;
+            font-family: 'Fira Code', monospace; white-space: nowrap;
+        }
+        .score-pill.green  { background: rgba(0,255,136,0.12); color: #00ff88; border: 1px solid rgba(0,255,136,0.2); }
+        .score-pill.cyan   { background: rgba(0,212,255,0.12); color: #00d4ff; border: 1px solid rgba(0,212,255,0.2); }
+        .score-pill.orange { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
+        .score-pill.red    { background: rgba(244,63,94,0.12);  color: #f43f5e; border: 1px solid rgba(244,63,94,0.2);  }
+        .score-pill.dim    { background: rgba(100,116,139,0.1); color: #94a3b8; border: 1px solid rgba(100,116,139,0.15); }
+
+        /* ── RISK PILL ───────────────────────────────────── */
+        .risk-CRITICAL { background: rgba(244,63,94,0.12);  color: #f43f5e; border: 1px solid rgba(244,63,94,0.25);  }
+        .risk-HIGH     { background: rgba(249,115,22,0.12); color: #f97316; border: 1px solid rgba(249,115,22,0.25); }
+        .risk-MEDIUM   { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25); }
+        .risk-LOW      { background: rgba(0,255,136,0.12);  color: #00ff88; border: 1px solid rgba(0,255,136,0.2);   }
+        .risk-INFO     { background: rgba(100,116,139,0.1); color: #94a3b8; border: 1px solid rgba(100,116,139,0.15); }
+
+        /* ── ACTION BUTTONS ──────────────────────────────── */
+        .btn-action {
+            padding: 0.28rem 0.55rem; border-radius: 5px; font-size: 0.75rem;
+            cursor: pointer; border: 1px solid transparent; transition: var(--transition);
+            font-family: 'Inter', sans-serif; display: inline-flex; align-items: center; gap: 4px;
+        }
+        .btn-eye  { background: rgba(0,212,255,0.08); border-color: rgba(0,212,255,0.2); color: var(--cyan); }
+        .btn-eye:hover  { background: rgba(0,212,255,0.18); }
+        .btn-dl   { background: rgba(0,255,136,0.08); border-color: rgba(0,255,136,0.2); color: var(--green); }
+        .btn-dl:hover   { background: rgba(0,255,136,0.18); }
+        .btn-dl:disabled { opacity: 0.35; cursor: not-allowed; }
+        .btn-del  { background: rgba(244,63,94,0.08); border-color: rgba(244,63,94,0.2); color: var(--red); }
+        .btn-del:hover  { background: rgba(244,63,94,0.18); }
+
+        /* ── SÉVÉRITÉ PILLS ──────────────────────────────── */
+        .sev-pills { display: flex; gap: 4px; flex-wrap: wrap; }
+        .sev-pill {
+            font-size: 0.68rem; font-weight: 700; padding: 0.15rem 0.45rem;
+            border-radius: 4px; font-family: 'Fira Code', monospace; white-space: nowrap;
+        }
+        .sev-pill.CRITICAL { background: rgba(244,63,94,0.15); color: #f43f5e; }
+        .sev-pill.HIGH     { background: rgba(249,115,22,0.15); color: #f97316; }
+        .sev-pill.MEDIUM   { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        .sev-pill.LOW      { background: rgba(99,102,241,0.15); color: #818cf8; }
+        .sev-pill.INFO     { background: rgba(100,116,139,0.1); color: #94a3b8; }
+
+        /* ── MODAL ───────────────────────────────────────── */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; z-index: 200;
+            background: rgba(2,8,23,0.85); backdrop-filter: blur(6px);
+            align-items: flex-start; justify-content: flex-end;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-panel {
+            width: min(760px, 100vw); height: 100vh; overflow-y: auto;
+            background: #060f1e; border-left: 1px solid var(--border);
+            box-shadow: -30px 0 80px rgba(0,0,0,0.6);
+            animation: slideIn 0.25s ease;
+        }
+        @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .modal-header {
+            padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border2);
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+            position: sticky; top: 0; background: #060f1e; z-index: 2;
+        }
+        .modal-title { font-size: 1rem; font-weight: 700; color: var(--text-bright); }
+        .modal-subtitle { font-size: 0.78rem; color: var(--text-dim); margin-top: 0.2rem; }
+        .modal-close {
+            width: 32px; height: 32px; border-radius: 6px; cursor: pointer;
+            background: rgba(0,212,255,0.07); border: 1px solid var(--border2);
+            color: var(--text-dim); display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; transition: var(--transition); font-size: 1rem;
+        }
+        .modal-close:hover { color: var(--text-bright); background: rgba(0,212,255,0.14); }
+        .modal-body { padding: 1.25rem 1.5rem; }
+        .modal-section { margin-bottom: 1.5rem; }
+        .modal-section-title {
+            font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.1em; color: var(--text-dim); margin-bottom: 0.75rem;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .modal-section-title i { color: var(--cyan); }
+        .modal-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+        .modal-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+        .info-item {
+            background: rgba(0,212,255,0.04); border: 1px solid var(--border2);
+            border-radius: 8px; padding: 0.6rem 0.85rem;
+        }
+        .info-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); margin-bottom: 0.2rem; }
+        .info-value { font-size: 0.88rem; color: var(--text-bright); font-family: 'Fira Code', monospace; }
+        .info-value.big { font-size: 1.35rem; font-weight: 700; }
+
+        /* Score gauge */
+        .score-gauge-wrap { display: flex; align-items: center; gap: 1.5rem; }
+        .score-circle {
+            width: 90px; height: 90px; border-radius: 50%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            border: 3px solid var(--border2); flex-shrink: 0;
+        }
+        .score-circle .sc-num { font-size: 1.5rem; font-weight: 800; line-height: 1; font-family: 'Fira Code', monospace; }
+        .score-circle .sc-lbl { font-size: 0.65rem; color: var(--text-dim); margin-top: 2px; }
+        .score-circle .sc-grade { font-size: 1rem; font-weight: 700; font-family: 'Fira Code', monospace; }
+
+        /* Progress bar mini */
+        .cat-bar-wrap { display: flex; flex-direction: column; gap: 8px; }
+        .cat-bar { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; }
+        .cat-bar-label { width: 65px; color: var(--text-dim); font-size: 0.72rem; flex-shrink: 0; }
+        .cat-bar-track { flex: 1; height: 5px; background: rgba(0,212,255,0.08); border-radius: 3px; overflow: hidden; }
+        .cat-bar-fill  { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+        .cat-bar-val   { width: 30px; text-align: right; font-family: 'Fira Code', monospace; color: var(--text-dim); font-size: 0.72rem; }
+
+        /* Narrative text */
+        .narrative-text {
+            font-size: 0.83rem; color: var(--text); line-height: 1.65;
+            white-space: pre-wrap; word-break: break-word;
+            background: rgba(0,212,255,0.03); border: 1px solid var(--border2);
+            border-radius: 8px; padding: 0.85rem;
+        }
+        .reco-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+        .reco-list li {
+            display: flex; gap: 8px; font-size: 0.83rem; line-height: 1.5;
+            padding: 0.5rem 0.75rem; background: rgba(0,212,255,0.03);
+            border: 1px solid var(--border2); border-radius: 6px;
+        }
+        .reco-list li .reco-num {
+            font-family: 'Fira Code', monospace; font-size: 0.72rem;
+            color: var(--cyan); font-weight: 700; flex-shrink: 0; padding-top: 2px;
+        }
+        .pos-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+        .pos-list li {
+            display: flex; align-items: flex-start; gap: 6px; font-size: 0.83rem;
+            color: var(--green);
+        }
+        .pos-list li::before { content: '✓'; font-weight: 700; flex-shrink: 0; }
+        .pos-list li span { color: var(--text); }
+
+        /* Modal footer */
+        .modal-footer {
+            padding: 1rem 1.5rem; border-top: 1px solid var(--border2);
+            display: flex; gap: 0.75rem; justify-content: flex-end;
+            position: sticky; bottom: 0; background: #060f1e; z-index: 2;
+        }
+        .btn-primary {
+            padding: 0.5rem 1.25rem;
+            background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(124,58,237,0.15));
+            border: 1px solid var(--border); border-radius: 7px; color: var(--cyan);
+            font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; transition: var(--transition);
+            display: flex; align-items: center; gap: 6px;
+        }
+        .btn-primary:hover { background: rgba(0,212,255,0.25); transform: translateY(-1px); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-secondary {
+            padding: 0.5rem 1.25rem; background: rgba(100,116,139,0.1);
+            border: 1px solid rgba(100,116,139,0.2); border-radius: 7px; color: var(--text-dim);
+            font-family: 'Inter', sans-serif; font-size: 0.85rem; cursor: pointer; transition: var(--transition);
+        }
+        .btn-secondary:hover { color: var(--text-bright); border-color: rgba(100,116,139,0.4); }
+
+        /* Timing row */
+        .timing-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+        .timing-chip {
+            display: flex; flex-direction: column; align-items: center;
+            background: rgba(0,212,255,0.04); border: 1px solid var(--border2);
+            border-radius: 8px; padding: 0.5rem 1rem; min-width: 100px;
+        }
+        .timing-chip .tc-val { font-size: 1rem; font-weight: 700; color: var(--cyan); font-family: 'Fira Code', monospace; }
+        .timing-chip .tc-lbl { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); margin-top: 2px; }
+
+        /* ── RESPONSIVENESS ──────────────────────────────── */
+        @media (max-width: 768px) {
+            .dash-main { padding: 1rem 0.75rem; }
+            /* .stats-grid déjà à 2 colonnes via le breakpoint 1100px ci-dessus */
+            .charts-grid { grid-template-columns: 1fr; }
+            .modal-grid2, .modal-grid3 { grid-template-columns: 1fr; }
+            .modal-panel { width: 100vw; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+    <div class="login-card">
+        <div class="login-logo">
+            <div class="icon-wrap"><i class="fas fa-shield-halved"></i></div>
+            <h1>Recon IA</h1>
+            <p>Tableau de bord d'administration</p>
+        </div>
+        <form id="login-form" autocomplete="off">
+            <div class="form-group">
+                <label class="form-label" for="api-url">URL de l'API</label>
+                <div class="input-wrap">
+                    <i class="fas fa-link"></i>
+                    <input type="url" id="api-url" class="form-input" placeholder="https://api.example.com" required autocomplete="off">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="api-email">Email</label>
+                <div class="input-wrap">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email" id="api-email" class="form-input" placeholder="admin@example.com" required autocomplete="email">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="api-pass">Mot de passe</label>
+                <div class="input-wrap">
+                    <i class="fas fa-lock"></i>
+                    <input type="password" id="api-pass" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+                </div>
+            </div>
+            <button type="submit" class="btn-login" id="btn-login">
+                <i class="fas fa-right-to-bracket"></i> Accéder au dashboard
+            </button>
+            <div class="login-error" id="login-error"></div>
+        </form>
+    </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard">
+
+    <header class="dash-header">
+        <div class="dash-logo">
+            <i class="fas fa-shield-halved"></i>
+            <span>Recon IA — Dashboard</span>
+        </div>
+        <div class="dash-actions">
+            <span class="api-badge" id="api-url-badge">—</span>
+            <button class="btn-icon" id="btn-refresh"><i class="fas fa-rotate-right"></i> Actualiser</button>
+            <button class="btn-icon" id="btn-autorefresh">
+                <span class="refresh-dot" id="auto-dot" style="display:none"></span>Auto
+            </button>
+            <button class="btn-icon" id="btn-logout"><i class="fas fa-right-from-bracket"></i></button>
+        </div>
+    </header>
+
+    <nav class="dash-tabs">
+        <button class="dash-tab metier active" data-tab="metier">
+            <i class="fas fa-satellite-dish"></i> Reconnaissances &amp; Rapports
+        </button>
+        <button class="dash-tab tech" data-tab="tech">
+            <i class="fas fa-server"></i> Logs Applicatifs
+        </button>
+    </nav>
+
+    <main class="dash-main">
+
+        <!-- ════ TAB MÉTIER ════ -->
+        <div class="tab-panel active" id="tab-metier">
+
+            <!-- Bandeau méthodologie — transparence académique -->
+            <div class="methodology-banner" id="methodology-banner">
+                <i class="fas fa-circle-info"></i>
+                <span id="methodology-text">
+                    Méthodologie : reconnaissance passive uniquement — aucune interaction
+                    intrusive avec les systèmes cibles.
+                </span>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon cyan"><i class="fas fa-globe"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-total">—</div><div class="stat-label">Total reconnaissances</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green"><i class="fas fa-file-pdf"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-pdf">—</div><div class="stat-label">PDF générés</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue"><i class="fas fa-brain"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-analysis">—</div><div class="stat-label">Analyses IA</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange"><i class="fas fa-hourglass-half"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-pending">—</div><div class="stat-label">En cours / Attente</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon purple"><i class="fas fa-shield-halved"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-avg-score">—</div><div class="stat-label">Score moy. sécurité</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green"><i class="fas fa-percent"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-rate">—</div><div class="stat-label">Taux de succès</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon cyan"><i class="fas fa-stopwatch"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-avg-scan-duration">—</div><div class="stat-label">Durée moy. scan OSINT</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange"><i class="fas fa-clock"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="recon-avg-flow-duration">—</div><div class="stat-label">Durée moy. flux complet</div></div>
+                </div>
+            </div>
+
+            <!-- Utilisation IA (tokens) — section dédiée plutôt que mêlée aux KPI
+                 opérationnels ci-dessus : coût/usage IA est une préoccupation
+                 distincte, et 3 cartes (comme Conformité & Recherche juste en
+                 dessous) s'alignent proprement au lieu de casser la grille du
+                 bandeau principal (8 cartes → 2 lignes de 4, propre). -->
+            <div class="logs-card" style="margin-bottom:1rem">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-coins"></i> Utilisation IA (tokens)</div>
+                </div>
+                <div class="stats-grid" style="padding:1rem 1.25rem 0">
+                    <div class="stat-card">
+                        <div class="stat-icon blue"><i class="fas fa-coins"></i></div>
+                        <div class="stat-info"><div class="stat-value" id="recon-avg-tokens">—</div><div class="stat-label">Tokens moy. / analyse</div></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon purple"><i class="fas fa-layer-group"></i></div>
+                        <div class="stat-info"><div class="stat-value" id="recon-total-tokens">—</div><div class="stat-label">Tokens cumulés (total)</div></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan"><i class="fas fa-vial"></i></div>
+                        <div class="stat-info"><div class="stat-value" id="recon-tokens-measured">—</div><div class="stat-label">Analyses mesurées</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Conformité & Recherche — métriques destinées à une présentation/publication -->
+            <div class="logs-card" style="margin-bottom:1rem">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-clipboard-check"></i> Conformité &amp; Recherche</div>
+                </div>
+                <div class="stats-grid" style="padding:1rem 1.25rem 0">
+                    <div class="stat-card">
+                        <div class="stat-icon green"><i class="fas fa-link"></i></div>
+                        <div class="stat-info"><div class="stat-value" id="cmp-traceability">—</div><div class="stat-label">Traçabilité outil→finding</div></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon purple"><i class="fas fa-crosshairs"></i></div>
+                        <div class="stat-info"><div class="stat-value" id="cmp-mitre-coverage">—</div><div class="stat-label">Couverture MITRE ATT&amp;CK</div></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan"><i class="fas fa-toolbox"></i></div>
+                        <div class="stat-info"><div class="stat-value" id="cmp-tools-reliability">—</div><div class="stat-label">Fiabilité des 47 outils OSINT</div></div>
+                    </div>
+                </div>
+                <div class="charts-grid" style="padding:1rem 1.25rem">
+                    <div class="chart-card">
+                        <div class="chart-title"><i class="fas fa-chart-pie"></i> Fiabilité des outils (tous scans)</div>
+                        <div class="chart-wrap"><canvas id="chart-tools-reliability"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title"><i class="fas fa-chart-bar"></i> Techniques MITRE ATT&amp;CK par tactique</div>
+                        <div class="chart-wrap"><canvas id="chart-mitre"></canvas></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="logs-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-table-list"></i> Reconnaissances</div>
+                    <div class="logs-filters">
+                        <input type="text" class="filter-input" id="filter-domain" placeholder="Rechercher un domaine…">
+                        <select class="filter-select" id="filter-recon-status">
+                            <option value="">Tous statuts</option>
+                            <option value="pending">Pending</option>
+                            <option value="running">Running</option>
+                            <option value="success">Success</option>
+                            <option value="failed">Failed</option>
+                        </select>
+                        <button class="btn-icon" id="btn-apply-recon-filters"><i class="fas fa-filter"></i> Filtrer</button>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Domaine</th>
+                                <th>Requérant</th>
+                                <th>Statut</th>
+                                <th>Score</th>
+                                <th>Durée scan</th>
+                                <th>Durée totale</th>
+                                <th>Analyse IA</th>
+                                <th>Tokens</th>
+                                <th>PDF</th>
+                                <th>Créé</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recon-tbody">
+                            <tr><td colspan="12" class="empty-state"><i class="fas fa-spinner fa-spin"></i> Chargement…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="logs-footer">
+                    <span id="recon-count">—</span>
+                    <div style="display:flex;gap:0.5rem;align-items:center">
+                        <button class="btn-icon" id="btn-recon-prev" disabled><i class="fas fa-chevron-left"></i></button>
+                        <span id="recon-page-info">—</span>
+                        <button class="btn-icon" id="btn-recon-next" disabled><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /tab-metier -->
+
+        <!-- ════ TAB TECHNIQUE ════ -->
+        <div class="tab-panel" id="tab-tech">
+
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon cyan"><i class="fas fa-circle-nodes"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="stat-total">—</div><div class="stat-label">Requêtes totales</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green"><i class="fas fa-circle-check"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="stat-2xx">—</div><div class="stat-label">Succès (2xx)</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon red"><i class="fas fa-triangle-exclamation"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="stat-errors">—</div><div class="stat-label">Erreurs (4xx+5xx)</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange"><i class="fas fa-gauge-high"></i></div>
+                    <div class="stat-info"><div class="stat-value" id="stat-duration">—</div><div class="stat-label">Durée moy. (ms)</div></div>
+                </div>
+            </div>
+
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <div class="chart-title"><i class="fas fa-chart-pie"></i> Répartition statuts</div>
+                    <div class="chart-wrap"><canvas id="chart-status"></canvas></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title"><i class="fas fa-chart-bar"></i> Top endpoints</div>
+                    <div class="chart-wrap"><canvas id="chart-endpoints"></canvas></div>
+                </div>
+            </div>
+
+            <div class="logs-card" style="margin-bottom:1rem">
+                <div class="logs-header"><div class="logs-title"><i class="fas fa-bug"></i> Top erreurs</div></div>
+                <div style="padding:0.75rem 1.25rem">
+                    <div class="errors-list" id="errors-list">
+                        <div class="empty-state"><i class="fas fa-circle-check"></i> Aucune erreur enregistrée</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="logs-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-list-ul"></i> Logs récents</div>
+                    <div class="logs-filters">
+                        <select class="filter-select" id="filter-method">
+                            <option value="">Méthode</option>
+                            <option>GET</option><option>POST</option>
+                            <option>PUT</option><option>PATCH</option><option>DELETE</option>
+                        </select>
+                        <select class="filter-select" id="filter-status">
+                            <option value="">Statut</option>
+                            <option value="2xx">2xx</option>
+                            <option value="4xx">4xx</option>
+                            <option value="5xx">5xx</option>
+                        </select>
+                        <button class="btn-icon" id="btn-apply-filters"><i class="fas fa-filter"></i> Filtrer</button>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>#</th><th>Méthode</th><th>Endpoint</th><th>Statut</th><th>Durée (ms)</th><th>IP</th><th>Date</th></tr>
+                        </thead>
+                        <tbody id="logs-tbody">
+                            <tr><td colspan="7" class="empty-state"><i class="fas fa-spinner fa-spin"></i> Chargement…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="logs-footer">
+                    <span id="logs-count">—</span>
+                    <div style="display:flex;gap:0.5rem;align-items:center">
+                        <button class="btn-icon" id="btn-logs-prev" disabled><i class="fas fa-chevron-left"></i></button>
+                        <span id="logs-page-info">—</span>
+                        <button class="btn-icon" id="btn-logs-next" disabled><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /tab-tech -->
+
+    </main>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal-panel" id="modal-panel">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title" id="modal-title">—</div>
+                <div class="modal-subtitle" id="modal-subtitle">—</div>
+            </div>
+            <button class="modal-close" id="modal-close"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="modal-body" id="modal-body">
+            <div class="empty-state"><span class="loading-spinner"></span> Chargement du rapport…</div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-primary" id="modal-btn-dl" style="display:none">
+                <i class="fas fa-file-pdf"></i> Télécharger PDF
+            </button>
+            <button class="btn-secondary" id="modal-btn-json" title="Dump complet + empreinte de reproductibilité">
+                <i class="fas fa-file-code"></i> Télécharger JSON
+            </button>
+            <button class="btn-secondary" id="modal-btn-csv" title="Findings tabulaires (une ligne par observation)">
+                <i class="fas fa-file-csv"></i> Télécharger CSV
+            </button>
+            <button class="btn-secondary" id="modal-btn-close">Fermer</button>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js 4.4.1 auto-hébergé (vendor/) — pas de CDN tiers :
+     version figée pour la reproductibilité, aucune fuite d'usage vers un tiers. -->
+<script src="vendor/chart.umd.min.js"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+    'use strict';
+
+    // Valeur par défaut du champ URL API du login — configurable via la
+    // variable DASHBOARD_API_BASE (.env racine, voir docker-compose.yml),
+    // injectée dans config.js par l'entrypoint nginx au démarrage du
+    // conteneur `web`. Repli sur la prod si config.js est absent/vide.
+    const API_BASE_DEFAULT =
+        (window.RECON_IA_CONFIG && window.RECON_IA_CONFIG.API_BASE) || 'https://api.idachallenge.bj';
+    let _apiBase = '';
+    let _authHeader = '';
+    let _chartStatus = null;
+    let _chartEndpoints = null;
+    let _chartToolsReliability = null;
+    let _chartMitre = null;
+    let _autoRefreshTimer = null;
+    let _currentPage = 1;
+    let _totalLogPages = 1;
+    const PER_PAGE = 50;
+    let _currentReconPage = 1;
+    let _totalReconPages = 1;
+    const RECON_PER_PAGE = 20;
+    let _modalReconId = null;
+    let _modalDomain = null;
+    // Dernières lignes rendues — permet à la délégation d'évènement de
+    // retrouver le domaine d'une ligne sans le sérialiser dans le HTML.
+    let _lastReconRows = [];
+
+    /* ── UTILS ─────────────────────────────────────────────── */
+    function b64(str) { return btoa(unescape(encodeURIComponent(str))); }
+
+    /**
+     * Parse un horodatage renvoyé par l'API en Date.
+     *
+     * L'API sérialise désormais tous les timestamps en ISO-8601 UTC suffixés 'Z'.
+     * Le repli ci-dessous couvre les enregistrements produits avant ce correctif
+     * (ISO naïf sans suffixe), qui doivent eux aussi être lus comme de l'UTC —
+     * sans quoi le navigateur les interprète en heure locale et décale tout.
+     *
+     * SEUL point du dashboard où une date est convertie : ne pas réintroduire
+     * de concaténation ad-hoc de 'Z' ou '+00:00' ailleurs dans ce fichier.
+     */
+    function parseApiDate(iso) {
+        if (!iso) return null;
+        let s = String(iso);
+        const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(s);
+        if (!hasZone) s += 'Z';
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    /** Formatage unique et centralisé de toutes les dates affichées. */
+    function formatDate(iso) {
+        const d = parseApiDate(iso);
+        if (!d) return '—';
+        return d.toLocaleString('fr-FR', {
+            day: '2-digit', month: '2-digit', year: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+    }
+
+    /** Écart en secondes entre deux horodatages API (null si incalculable). */
+    function diffSeconds(fromIso, toIso) {
+        const a = parseApiDate(fromIso);
+        const b = parseApiDate(toIso);
+        if (!a || !b) return null;
+        return (b - a) / 1000;
+    }
+
+    function fmtDuration(seconds) {
+        if (seconds == null) return '—';
+        const s = parseFloat(seconds);
+        if (s < 60) return s.toFixed(1) + ' s';
+        const m = Math.floor(s / 60);
+        const rem = Math.round(s % 60);
+        return `${m} min ${rem} s`;
+    }
+
+    /**
+     * Échappement HTML.
+     *
+     * Ne traite comme vides que null/undefined : un `String(s || '')` effaçait
+     * silencieusement les valeurs falsy légitimes — le nombre 0 s'affichait
+     * blanc, si bien qu'un score de 0/100 ou un compteur « 0 CRITICAL »
+     * disparaissait de l'écran.
+     */
+    function escHtml(s) {
+        if (s === null || s === undefined) return '';
+        return String(s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function methodBadge(m) {
+        const mu = (m || '').toUpperCase();
+        return `<span class="badge badge-method-${mu}">${mu}</span>`;
+    }
+
+    function statusBadge(code) {
+        const c = parseInt(code, 10);
+        let cls = 'badge-2xx';
+        if (c >= 300 && c < 400) cls = 'badge-3xx';
+        else if (c >= 400 && c < 500) cls = 'badge-4xx';
+        else if (c >= 500) cls = 'badge-5xx';
+        return `<span class="badge ${cls}">${code}</span>`;
+    }
+
+    // Étapes du pipeline (voir models/recon.py::current_step) — libellé court
+    // affiché sous le badge de statut pendant que status='running', ou pour
+    // indiquer à quelle étape un scan a échoué (status='failed').
+    const STEP_LABELS = {
+        scanning_osint:          'Scan OSINT (47 outils)',
+        analyzing_ai:            'Analyse IA',
+        // Ollama est une instance unique CPU seul partagée par tout le projet
+        // (utils/ollama_lock.py) : un scan peut attendre son tour si une autre
+        // analyse locale est déjà en cours.
+        analyzing_ai_queued:     'En file d\'attente (Ollama occupé)',
+        generating_final_report: 'Rédaction du rapport',
+        generating_pdf:          'Génération du PDF',
+        completed:               'Terminé',
+    };
+
+    function reconStatusBadge(status, currentStep, stepUpdatedAt) {
+        const s = (status || 'pending').toLowerCase();
+        const labels = { pending:'En attente', running:'En cours', success:'Complété', failed:'Échoué' };
+        let html = `<span class="badge badge-${s}">${labels[s] || s}</span>`;
+
+        // N'affiche l'étape que pour running/failed — success est déjà clair
+        // via le badge, pending n'a pas encore d'étape assignée.
+        if ((s === 'running' || s === 'failed') && currentStep && currentStep !== 'completed') {
+            const stepLabel = STEP_LABELS[currentStep] || currentStep;
+            let ago = '';
+            if (stepUpdatedAt) {
+                const secs = (Date.now() - new Date(stepUpdatedAt).getTime()) / 1000;
+                if (secs >= 0) ago = ` (depuis ${fmtDuration(secs)})`;
+            }
+            const prefix = s === 'failed' ? 'bloqué à : ' : '';
+            html += `<div style="font-size:.75rem;color:var(--text-dim);margin-top:2px">${prefix}${escHtml(stepLabel)}${ago}</div>`;
+        }
+        return html;
+    }
+
+    function gradeClass(grade) {
+        if (!grade) return 'dim';
+        const g = grade.toUpperCase();
+        if (g.startsWith('A')) return 'green';
+        if (g.startsWith('B')) return 'cyan';
+        if (g.startsWith('C')) return 'orange';
+        return 'red';
+    }
+
+    function scoreBarColor(score) {
+        if (score >= 80) return '#00ff88';
+        if (score >= 60) return '#00d4ff';
+        if (score >= 40) return '#f59e0b';
+        return '#f43f5e';
+    }
+
+    /** Accepte tout objet portant security_score/security_grade
+     *  (ligne de /recon comme bloc analysis_result). */
+    function scorePill(src) {
+        if (!src) return '<span class="score-pill dim">—</span>';
+        const score = src.security_score;
+        const grade = src.security_grade;
+        if (score == null) return '<span class="score-pill dim">—</span>';
+        // gradeClass() ne renvoie qu'une classe d'une liste fermée ; score et
+        // grade sont en revanche échappés (ils transitent par analysis_result,
+        // donc potentiellement par la sortie du modèle IA).
+        const cls = gradeClass(grade);
+        return `<span class="score-pill ${cls}">${escHtml(score)}/100 <strong>${escHtml(grade || '')}</strong></span>`;
+    }
+
+    function analysisBadge(r) {
+        if (!r.has_analysis) return '—';
+        if (r.analysis_cache_valid) return `<span class="score-pill cyan" title="Cache valide jusqu'au ${formatDate(r.analysis_expires_at)}"><i class="fas fa-bolt"></i> Actif</span>`;
+        return `<span class="score-pill dim">Expiré</span>`;
+    }
+
+    /* ── API ──────────────────────────────────────────────── */
+    async function apiFetch(path) {
+        const r = await fetch(_apiBase + path, {
+            headers: { 'Authorization': 'Basic ' + _authHeader, 'Accept': 'application/json' }
+        });
+        if (r.status === 401) throw new Error('401');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+    }
+
+    async function apiFetchBinary(path) {
+        const r = await fetch(_apiBase + path, {
+            headers: { 'Authorization': 'Basic ' + _authHeader }
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+    }
+
+    /* ── RECON STATS ────────────────────────────────────────── */
+    /**
+     * KPI globaux — agrégés en SQL côté serveur sur l'ENSEMBLE des données.
+     *
+     * Auparavant ces compteurs étaient calculés en JS sur une seule page
+     * (`per_page=200`, plafonné à 100 par l'API) puis affichés comme des totaux
+     * globaux : au-delà de 100 enregistrements ils étaient silencieusement faux.
+     * Ne jamais recalculer ces valeurs depuis `loadReports()`.
+     */
+    async function loadReconStats() {
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+        try {
+            const resp = await apiFetch('/recon/stats');
+            if (!resp.success || !resp.data) return;
+            const s = resp.data;
+
+            setText('recon-total',    (s.total_recons || 0).toLocaleString('fr-FR'));
+            setText('recon-pdf',      (s.pdf_generated || 0).toLocaleString('fr-FR'));
+            setText('recon-analysis', (s.analyses_completed || 0).toLocaleString('fr-FR'));
+            setText('recon-pending',  (s.in_progress || 0).toLocaleString('fr-FR'));
+            setText('recon-rate',     (s.success_rate_pct != null ? s.success_rate_pct : 0) + ' %');
+            setText('recon-avg-score',
+                s.avg_security_score != null ? `${s.avg_security_score}/100` : '—');
+
+            const scoreCard = document.getElementById('recon-avg-score');
+            if (scoreCard) {
+                scoreCard.title = s.scored_recons
+                    ? `Moyenne sur ${s.scored_recons} analyse(s) IA — calculée le ${formatDate(s.computed_at)}`
+                    : 'Aucune analyse IA disponible';
+            }
+
+            // Durées moyennes — déjà calculées côté API (/recon/stats), simplement
+            // jamais affichées jusqu'ici. scan = collecte OSINT seule
+            // (completed_at - started_at) ; flux complet = du clic « vérifier
+            // l'email » jusqu'à la fin du rapport (end_report_date - start_report_date),
+            // attente utilisateur/IA incluse — les deux se distinguent nettement.
+            setText('recon-avg-scan-duration', fmtDuration(s.avg_scan_duration_s));
+            setText('recon-avg-flow-duration', fmtDuration(s.avg_flow_duration_s));
+            const scanDurCard = document.getElementById('recon-avg-scan-duration');
+            if (scanDurCard) {
+                scanDurCard.title = 'Moyenne sur tous les scans terminés (started_at → completed_at) — collecte OSINT seule, hors analyse IA/rapport';
+            }
+            const flowDurCard = document.getElementById('recon-avg-flow-duration');
+            if (flowDurCard) {
+                flowDurCard.title = 'Moyenne du flux complet (vérification email → rapport terminé), attente IA incluse';
+            }
+
+            // Tokens IA consommés — mesure de coût/usage (2026-07-30). Cumulé sur
+            // toutes les analyses jamais produites (tokens_total dénormalisé,
+            // voir models/recon.py) ; les analyses antérieures à cette mesure
+            // (tokens_total NULL) sont ignorées, pas comptées comme des zéros —
+            // "Analyses mesurées" rend ce sous-ensemble explicite plutôt que de
+            // laisser deviner la taille d'échantillon derrière la moyenne.
+            const tk = s.tokens || {};
+            setText('recon-avg-tokens',
+                tk.avg_tokens_per_analysis != null ? Math.round(tk.avg_tokens_per_analysis).toLocaleString('fr-FR') : '—');
+            setText('recon-total-tokens',
+                tk.total_tokens_all_time != null ? tk.total_tokens_all_time.toLocaleString('fr-FR') : '—');
+            setText('recon-tokens-measured', (tk.measured_analyses || 0).toLocaleString('fr-FR'));
+            const avgTokCard = document.getElementById('recon-avg-tokens');
+            if (avgTokCard) {
+                avgTokCard.title = tk.measured_analyses
+                    ? `Moyenne (prompt + réponse) sur ${tk.measured_analyses} analyse(s) mesurée(s)`
+                    : 'Aucune analyse mesurée (backends antérieurs à cette mesure)';
+            }
+            const totalTokCard = document.getElementById('recon-total-tokens');
+            if (totalTokCard) {
+                totalTokCard.title = 'Somme sur toutes les analyses mesurées, tous backends confondus (DeepSeek payant inclus)';
+            }
+            const measuredCard = document.getElementById('recon-tokens-measured');
+            if (measuredCard) {
+                measuredCard.title = `Sur ${(s.total_recons || 0)} reconnaissance(s) au total — le reste n'a pas encore de mesure (analyse antérieure à cette fonctionnalité)`;
+            }
+
+            renderComplianceStats(s.compliance);
+        } catch (err) { console.error('loadReconStats', err); }
+    }
+
+    /**
+     * Conformité & Recherche — traçabilité outil→finding, couverture MITRE
+     * ATT&CK, fiabilité des 47 outils OSINT. Lit `compliance` déjà inclus
+     * dans la réponse de /recon/stats (pas d'appel réseau supplémentaire) —
+     * ces trois blocs sont eux-mêmes des agrégats SQL/Python légers côté API
+     * (colonnes dénormalisées), jamais un reparsing de rapport complet.
+     */
+    function renderComplianceStats(compliance) {
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+        const c = compliance || {};
+        const trace = c.traceability || {};
+        const mitre = c.mitre_coverage || {};
+        const tools = c.tools_reliability || {};
+
+        setText('cmp-traceability',
+            trace.traceability_rate_pct != null ? `${trace.traceability_rate_pct} %` : '—');
+        const traceCard = document.getElementById('cmp-traceability');
+        if (traceCard) {
+            traceCard.title = trace.findings_total
+                ? `${trace.findings_traceable}/${trace.findings_total} findings référencent un outil exécuté, sur ${trace.analyses_checked} analyse(s)`
+                : 'Aucun finding analysé';
+        }
+
+        setText('cmp-mitre-coverage',
+            mitre.coverage_pct != null
+                ? `${mitre.distinct_techniques_count}/${mitre.total_known_techniques}`
+                : '—');
+        const mitreCard = document.getElementById('cmp-mitre-coverage');
+        if (mitreCard) {
+            mitreCard.title = mitre.coverage_pct != null
+                ? `${mitre.coverage_pct} % des techniques ATT&CK couvertes — moyenne ${mitre.avg_techniques_per_scan ?? '—'} technique(s)/scan`
+                : 'Aucun scan analysé';
+        }
+
+        setText('cmp-tools-reliability',
+            tools.success_rate_pct != null ? `${tools.success_rate_pct} %` : '—');
+        const toolsCard = document.getElementById('cmp-tools-reliability');
+        if (toolsCard) {
+            toolsCard.title = tools.total_tool_executions
+                ? `${tools.total_tool_executions} exécutions d'outil sur ${tools.scans_counted} scan(s)`
+                : 'Aucun scan enregistré';
+        }
+
+        // Doughnut — répartition des statuts d'exécution des outils
+        const byStatus = tools.by_status || {};
+        const statusLabels = Object.keys(byStatus);
+        const statusData   = statusLabels.map(k => byStatus[k]);
+        const statusColors = {
+            success: '#00ff88', error: '#f43f5e', timeout: '#f59e0b',
+            timeout_partial: '#f59e0b', skipped: '#64748b', not_found: '#94a3b8',
+            no_data: '#94a3b8', unavailable: '#94a3b8', limited: '#00d4ff',
+        };
+        const bg = statusLabels.map(k => (statusColors[k] || '#00d4ff') + '40');
+        const bd = statusLabels.map(k => statusColors[k] || '#00d4ff');
+        if (_chartToolsReliability) {
+            _chartToolsReliability.data.labels = statusLabels;
+            _chartToolsReliability.data.datasets[0].data = statusData;
+            _chartToolsReliability.data.datasets[0].backgroundColor = bg;
+            _chartToolsReliability.data.datasets[0].borderColor = bd;
+            _chartToolsReliability.update();
+        } else {
+            const canvas = document.getElementById('chart-tools-reliability');
+            if (canvas) {
+                _chartToolsReliability = new Chart(canvas, {
+                    type: 'doughnut',
+                    data: { labels: statusLabels, datasets: [{
+                        data: statusData, backgroundColor: bg, borderColor: bd,
+                        borderWidth: 2, hoverOffset: 6,
+                    }]},
+                    options: { responsive:true, maintainAspectRatio:true, cutout:'68%',
+                        plugins: { legend: { position:'bottom', labels:{ color:'#94a3b8', font:{size:10}, padding:8 } } } }
+                });
+            }
+        }
+
+        // Barres — techniques MITRE distinctes détectées, par tactique
+        const byTactic = mitre.by_tactic || {};
+        const tacticLabels = Object.keys(byTactic);
+        const tacticData   = tacticLabels.map(k => byTactic[k]);
+        if (_chartMitre) {
+            _chartMitre.data.labels = tacticLabels;
+            _chartMitre.data.datasets[0].data = tacticData;
+            _chartMitre.update();
+        } else {
+            const canvas = document.getElementById('chart-mitre');
+            if (canvas) {
+                _chartMitre = new Chart(canvas, {
+                    type: 'bar',
+                    data: { labels: tacticLabels, datasets: [{ label: 'Techniques', data: tacticData,
+                        backgroundColor:'#a855f730', borderColor:'#a855f7', borderWidth:1, borderRadius:4 }]},
+                    options: { indexAxis:'y', responsive:true, maintainAspectRatio:true,
+                        plugins:{ legend:{ display:false } },
+                        scales: {
+                            x:{ grid:{ color:'rgba(0,212,255,0.06)' }, ticks:{ color:'#94a3b8', font:{size:11}, precision:0 } },
+                            y:{ grid:{ display:false }, ticks:{ color:'#94a3b8', font:{size:11} } }
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    /**
+     * Bandeau méthodologie — renseigné avec les outils réellement exécutés
+     * lors de la dernière reconnaissance consultée (source : scan_results).
+     */
+    function updateMethodologyBanner(tools) {
+        const el = document.getElementById('methodology-text');
+        if (!el) return;
+        if (!tools || tools.length === 0) {
+            el.innerHTML = '<strong>Méthodologie :</strong> reconnaissance passive uniquement — ' +
+                'aucune interaction intrusive avec les systèmes cibles.';
+            return;
+        }
+        const names = tools.map(t => escHtml(t.name || t.key)).join(', ');
+        el.innerHTML = '<strong>Méthodologie :</strong> reconnaissance passive uniquement — ' +
+            `${tools.length} outil(s) exécuté(s), sources : ${names}.`;
+    }
+
+    /* ── REPORTS TABLE ──────────────────────────────────────── */
+    async function loadReports(page) {
+        page = page || 1;
+        _currentReconPage = page;
+        const statusFilter = document.getElementById('filter-recon-status').value;
+        const domainFilter = document.getElementById('filter-domain').value.trim();
+        let qs = `?page=${page}&per_page=${RECON_PER_PAGE}`;
+        if (statusFilter) qs += `&status=${encodeURIComponent(statusFilter)}`;
+        // Filtrage du domaine délégué au serveur : filtrer côté client APRÈS
+        // pagination masquait les résultats situés sur les autres pages et
+        // laissait le compteur afficher un total non filtré.
+        if (domainFilter) qs += `&domain=${encodeURIComponent(domainFilter)}`;
+
+        const tbody = document.getElementById('recon-tbody');
+        tbody.innerHTML = `<tr><td colspan="12" style="padding:2rem;text-align:center;color:#64748b"><span class="loading-spinner"></span> Chargement…</td></tr>`;
+
+        try {
+            const resp = await apiFetch('/recon' + qs);
+            if (!resp.success) return;
+
+            _totalReconPages = resp.pages || 1;
+            document.getElementById('recon-count').textContent =
+                `${(resp.total || 0).toLocaleString('fr-FR')} reconnaissance(s)`;
+            document.getElementById('recon-page-info').textContent =
+                `Page ${resp.page} / ${resp.pages}`;
+            document.getElementById('btn-recon-prev').disabled = page <= 1;
+            document.getElementById('btn-recon-next').disabled = page >= resp.pages;
+
+            const items = resp.data || [];
+            _lastReconRows = items;
+
+            if (items.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="12" class="empty-state"><i class="fas fa-inbox"></i> Aucune reconnaissance trouvée</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = items.map(r => {
+                const fullname = escHtml(((r.firstname||'') + ' ' + (r.lastname||'')).trim() || '—');
+                const email    = escHtml(r.email || '—');
+                const domain   = escHtml(r.domain || '—');
+                // Durée figée du scan (fin - début), fournie par l'API
+                const duration = fmtDuration(r.scan_duration_s != null ? r.scan_duration_s : r.execution_time);
+                // Durée totale du flux (vérification email → PDF/email envoyé)
+                // — avant, uniquement visible dans la vue détail (modal), pas
+                // dans le tableau : il fallait ouvrir chaque ligne pour la voir.
+                const totalDuration = fmtDuration(r.flow_duration_s);
+                // Pas de onclick inline : escHtml échappe pour le contexte HTML,
+                // or le parseur redécode les entités AVANT que le JS ne soit
+                // évalué — une apostrophe dans le domaine s'échapperait de la
+                // chaîne. On passe par data-* + délégation d'évènement.
+                const pdfBtn   = r.has_pdf
+                    ? `<button class="btn-action btn-dl" data-action="pdf" data-id="${r.id}" title="Télécharger PDF"><i class="fas fa-file-pdf"></i></button>`
+                    : '<span style="color:var(--text-dim)">—</span>';
+
+                // analysis score from recon list (no score here, shown as badge)
+                const anaCell  = analysisBadge(r);
+                // Tokens IA consommés (mesure de coût/usage) — déjà dénormalisé
+                // dans to_dict(), aucun appel réseau supplémentaire par ligne.
+                // NULL pour les analyses antérieures à cette mesure.
+                const tokensCell = r.tokens_total != null
+                    ? `<span style="font-family:'Fira Code',monospace" title="${r.tokens_prompt ?? 0} prompt + ${r.tokens_completion ?? 0} réponse">${r.tokens_total.toLocaleString('fr-FR')}</span>`
+                    : '<span style="color:var(--text-dim)">—</span>';
+
+                return `<tr>
+                    <td style="color:var(--text-dim)">${r.id}</td>
+                    <td>
+                        <span class="domain-link" style="color:var(--cyan);font-family:'Fira Code',monospace;cursor:pointer;text-decoration:underline dotted"
+                              data-action="open" data-id="${r.id}" title="Voir détails">${domain}</span>
+                    </td>
+                    <td class="td-launcher">
+                        <div class="name">${fullname}</div>
+                        <div class="email-small">${email}</div>
+                    </td>
+                    <td>${reconStatusBadge(r.status, r.current_step, r.current_step_updated_at)}</td>
+                    <td>${scorePill(r)}</td>
+                    <td>${duration}</td>
+                    <td>${totalDuration}</td>
+                    <td>${anaCell}</td>
+                    <td>${tokensCell}</td>
+                    <td>${pdfBtn}</td>
+                    <td>${formatDate(r.created_at)}</td>
+                    <td>
+                        <button class="btn-action btn-eye" data-action="open" data-id="${r.id}" title="Détails"><i class="fas fa-eye"></i></button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Le score est déjà présent dans la réponse paginée (security_score /
+            // security_grade) — plus aucun GET /recon/<id>/report par ligne.
+
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="12" class="empty-state"><i class="fas fa-circle-exclamation"></i> Erreur de chargement</td></tr>`;
+            console.error('loadReports', err);
+        }
+    }
+
+    /* ── PDF DOWNLOAD ───────────────────────────────────────── */
+    async function downloadPdf(id, domain) {
+        try {
+            const blob = await apiFetchBinary(`/recon/${id}/report.pdf`);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `rapport_osint_${domain}_${id}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert('Erreur téléchargement PDF : ' + err.message);
+        }
+    }
+    window.downloadPdf = downloadPdf;
+
+    /* ── EXPORTS ACADÉMIQUES (JSON / CSV) ───────────────────── */
+    async function downloadExport(id, domain, kind) {
+        try {
+            const blob = await apiFetchBinary(`/recon/${id}/export.${kind}`);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = kind === 'csv'
+                ? `recon_ia_findings_${domain}_${id}.csv`
+                : `recon_ia_export_${domain}_${id}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert(`Erreur téléchargement ${kind.toUpperCase()} : ` + err.message);
+        }
+    }
+    window.downloadExport = downloadExport;
+
+    /* ── DETAIL MODAL ───────────────────────────────────────── */
+    window.openModal = async function openModal(id) {
+        _modalReconId = id;
+        _modalDomain  = null;
+        document.getElementById('modal-title').textContent = `Recon #${id}`;
+        document.getElementById('modal-subtitle').textContent = 'Chargement…';
+        document.getElementById('modal-body').innerHTML = `<div class="empty-state"><span class="loading-spinner"></span> Chargement du rapport…</div>`;
+        document.getElementById('modal-btn-dl').style.display = 'none';
+        document.getElementById('modal-overlay').classList.add('open');
+        document.body.style.overflow = 'hidden';
+
+        try {
+            const resp = await apiFetch(`/recon/${id}/report`);
+            if (!resp.success || !resp.data) throw new Error('Données non disponibles');
+            renderModal(resp.data);
+        } catch (err) {
+            document.getElementById('modal-body').innerHTML =
+                `<div class="empty-state"><i class="fas fa-circle-exclamation"></i> ${escHtml(err.message)}</div>`;
+        }
+    };
+
+    function renderModal(d) {
+        const analysis = d.analysis_result || null;
+        const final    = typeof d.final_report === 'string'
+            ? tryParseJson(d.final_report)
+            : (d.final_report || null);
+
+        _modalDomain = d.domain;
+
+        // Inventaire des outils exécutés — sert au bandeau méthodologie,
+        // à la section « données brutes » et à la résolution des source_tool.
+        const tools = extractTools(d.scan_results);
+        const toolIndex = {};
+        tools.forEach(t => { toolIndex[t.key] = t; });
+        updateMethodologyBanner(tools);
+
+        // textContent échappe déjà : appliquer escHtml en plus afficherait
+        // « &amp; » au lieu de « & ».
+        document.getElementById('modal-title').textContent = d.domain || '—';
+        document.getElementById('modal-subtitle').textContent =
+            `#${d.id} · ${reconStatusBadge(d.status).replace(/<[^>]+>/g,'')} · Créé ${formatDate(d.created_at)}`;
+        document.getElementById('modal-btn-dl').style.display = d.has_pdf ? 'flex' : 'none';
+
+        let html = '';
+
+        /* ── Identité ── */
+        html += `<div class="modal-section">
+            <div class="modal-section-title"><i class="fas fa-user"></i> Requérant</div>
+            <div class="modal-grid2">
+                <div class="info-item"><div class="info-label">Nom</div>
+                    <div class="info-value">${escHtml((d.firstname || '') + ' ' + (d.lastname || ''))}</div></div>
+                <div class="info-item"><div class="info-label">Email</div>
+                    <div class="info-value">${escHtml(d.email || '—')}</div></div>
+                <div class="info-item"><div class="info-label">Domaine cible</div>
+                    <div class="info-value" style="color:var(--cyan)">${escHtml(d.domain || '—')}</div></div>
+                <div class="info-item"><div class="info-label">Statut</div>
+                    <div class="info-value">${reconStatusBadge(d.status, d.current_step, d.current_step_updated_at)}</div></div>
+            </div>
+        </div>`;
+
+        /* ── Timings ──
+           Toutes les durées sont FIGÉES : elles se calculent depuis les
+           horodatages persistés (fin - début), jamais depuis Date.now().
+           « Total flux » grandissait auparavant à l'infini à chaque rafraîchissement. */
+        const scanDur    = timingValue(d);
+        const analysisDt = d.analysis_generated_at;
+        const scanEnd    = d.end_report_date || d.completed_at;
+        const totalDur   = d.flow_duration_s != null
+            ? d.flow_duration_s
+            : diffSeconds(d.start_report_date, d.end_report_date);
+        const analysisDur = diffSeconds(scanEnd, analysisDt);
+
+        html += `<div class="modal-section">
+            <div class="modal-section-title"><i class="fas fa-stopwatch"></i> Timings</div>
+            <div class="timing-row">
+                <div class="timing-chip"><div class="tc-val">${fmtDuration(scanDur)}</div><div class="tc-lbl">Scan OSINT</div></div>
+                ${analysisDur != null ? `<div class="timing-chip"><div class="tc-val">${fmtDuration(analysisDur)}</div><div class="tc-lbl">Analyse IA</div></div>` : ''}
+                ${totalDur != null ? `<div class="timing-chip"><div class="tc-val">${fmtDuration(totalDur)}</div><div class="tc-lbl">Total flux</div></div>` : ''}
+                ${d.started_at ? `<div class="timing-chip"><div class="tc-val" style="font-size:0.7rem;color:var(--text-dim)">${formatDate(d.started_at)}</div><div class="tc-lbl">Scan démarré</div></div>` : ''}
+                ${d.completed_at ? `<div class="timing-chip"><div class="tc-val" style="font-size:0.7rem;color:var(--text-dim)">${formatDate(d.completed_at)}</div><div class="tc-lbl">Scan terminé</div></div>` : ''}
+                ${analysisDt ? `<div class="timing-chip"><div class="tc-val" style="font-size:0.7rem;color:var(--text-dim)">${formatDate(analysisDt)}</div><div class="tc-lbl">Analyse générée</div></div>` : ''}
+            </div>
+        </div>`;
+
+        /* ── Sécurité ── */
+        if (analysis) {
+            const score = analysis.security_score;
+            const grade = analysis.security_grade;
+            const risk  = analysis.risk_level;
+            const posture = analysis.security_posture;
+            const fs    = analysis.findings_summary || {};
+            const bkd   = analysis.security_breakdown || {};
+            const glsCls = gradeClass(grade);
+            const circleColor = scoreBarColor(score || 0);
+
+            html += `<div class="modal-section">
+                <div class="modal-section-title"><i class="fas fa-shield-halved"></i> Score de sécurité</div>
+                <div class="score-gauge-wrap">
+                    <div class="score-circle" style="border-color:${circleColor}30;background:${circleColor}08">
+                        <div class="sc-num" style="color:${circleColor}">${score != null ? escHtml(score) : '—'}</div>
+                        <div class="sc-lbl">/100</div>
+                        <div class="sc-grade" style="color:${circleColor}">${escHtml(grade || '')}</div>
+                    </div>
+                    <div style="flex:1">
+                        ${risk ? `<div style="margin-bottom:0.5rem">${riskBadge(risk)}</div>` : ''}
+                        ${posture ? `<div style="font-size:0.82rem;color:var(--text);line-height:1.5;margin-bottom:0.75rem">${escHtml(posture)}</div>` : ''}
+                        <div class="sev-pills">
+                            ${SEVERITIES.map(s =>
+                                // compute_security_score() produit des clés en
+                                // MINUSCULES (critical, high, …) : lire fs[s] en
+                                // majuscules renvoyait toujours undefined et la
+                                // rangée de pastilles restait vide en permanence.
+                                fs[s.toLowerCase()] != null
+                                    ? `<span class="sev-pill ${s}" title="${s}">${escHtml(fs[s.toLowerCase()])} ${s}</span>`
+                                    : ''
+                            ).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+            /* Breakdown par catégorie */
+            const bkdEntries = Object.entries(bkd);
+            if (bkdEntries.length > 0) {
+                html += `<div class="modal-section">
+                    <div class="modal-section-title"><i class="fas fa-chart-bar"></i> Scores par catégorie</div>
+                    <div class="cat-bar-wrap">
+                        ${bkdEntries.map(([cat, val]) => {
+                            // security_breakdown[cat] est un OBJET
+                            // {score, grade, findings_count, critical, high},
+                            // pas un nombre : `val || 0` donnait NaN et toutes
+                            // les barres restaient vides. On lit val.score, en
+                            // tolérant l'ancien format numérique.
+                            const raw = (val && typeof val === 'object') ? val.score : val;
+                            const num = Number(raw);
+                            const pct = Number.isFinite(num)
+                                ? Math.max(0, Math.min(100, num)) : 0;
+                            const col = scoreBarColor(pct);
+                            const count = (val && typeof val === 'object' && val.findings_count != null)
+                                ? ` (${escHtml(val.findings_count)})` : '';
+                            return `<div class="cat-bar">
+                                <div class="cat-bar-label">${escHtml(cat)}${count}</div>
+                                <div class="cat-bar-track">
+                                    <div class="cat-bar-fill" style="width:${pct}%;background:${col}"></div>
+                                </div>
+                                <div class="cat-bar-val">${pct}</div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>`;
+            }
+
+            /* Executive summary de l'analyse */
+            if (analysis.executive_summary) {
+                html += `<div class="modal-section">
+                    <div class="modal-section-title"><i class="fas fa-file-lines"></i> Résumé exécutif (IA analyse)</div>
+                    <div class="narrative-text">${escHtml(analysis.executive_summary)}</div>
+                </div>`;
+            }
+
+            /* Contrôle de couverture (utils/coverage_check.py) — les données
+               collectées ont-elles ÉTÉ EXAMINÉES, pas seulement : les findings
+               produits sont-ils exacts (déjà couvert par grounding_check
+               au niveau de chaque finding, plus bas). */
+            html += renderCoverageCheck(analysis.coverage_check);
+
+            /* Findings avec traçabilité source_tool (phase 2) */
+            html += renderFindings(analysis.findings, toolIndex, analysis.grounding_check);
+        }
+
+        /* ── Rapport final narratif ── */
+        if (final) {
+            if (final.executive_summary) {
+                html += `<div class="modal-section">
+                    <div class="modal-section-title"><i class="fas fa-star"></i> Rapport final IA — Résumé exécutif</div>
+                    <div class="narrative-text">${escHtml(final.executive_summary)}</div>
+                </div>`;
+            }
+            if (final.key_findings_narrative) {
+                html += `<div class="modal-section">
+                    <div class="modal-section-title"><i class="fas fa-magnifying-glass"></i> Narration des findings</div>
+                    <div class="narrative-text">${escHtml(final.key_findings_narrative)}</div>
+                </div>`;
+            }
+            if (Array.isArray(final.prioritized_recommendations) && final.prioritized_recommendations.length > 0) {
+                html += `<div class="modal-section">
+                    <div class="modal-section-title"><i class="fas fa-list-check"></i> Recommandations priorisées</div>
+                    <ol class="reco-list">
+                        ${final.prioritized_recommendations.map((r,i) =>
+                            `<li><span class="reco-num">${i+1}.</span><span>${escHtml(r)}</span></li>`
+                        ).join('')}
+                    </ol>
+                </div>`;
+            }
+            if (Array.isArray(final.positive_points) && final.positive_points.length > 0) {
+                html += `<div class="modal-section">
+                    <div class="modal-section-title" style="color:var(--green)"><i class="fas fa-circle-check"></i> Points positifs</div>
+                    <ul class="pos-list">
+                        ${final.positive_points.map(p => `<li><span>${escHtml(p)}</span></li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            if (final.conclusion) {
+                html += `<div class="modal-section">
+                    <div class="modal-section-title"><i class="fas fa-flag-checkered"></i> Conclusion</div>
+                    <div class="narrative-text">${escHtml(final.conclusion)}</div>
+                </div>`;
+            }
+        }
+
+        /* ── Données brutes par outil ── */
+        html += renderRawTools(tools);
+
+        /* ── Aucune analyse ── */
+        if (!analysis && !final) {
+            html += `<div class="modal-section">
+                <div style="text-align:center;padding:2rem;color:var(--text-dim)">
+                    <i class="fas fa-brain" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:var(--border)"></i>
+                    Aucune analyse IA disponible pour cet enregistrement.<br>
+                    <small>Lancez POST /analyze avec recon_id=${d.id}</small>
+                </div>
+            </div>`;
+        }
+
+        document.getElementById('modal-body').innerHTML = html;
+    }
+
+    /* ── TRAÇABILITÉ OUTILS (données produites en phase 2) ──── */
+
+    /**
+     * Extrait l'inventaire des outils depuis scan_results.
+     * Seules les entrées portant un bloc `meta.tool` sont des outils —
+     * les autres clés (ex: `cache`, `domain`) sont ignorées.
+     */
+    function extractTools(scanResults) {
+        if (!scanResults || typeof scanResults !== 'object') return [];
+        const out = [];
+        Object.keys(scanResults).forEach(key => {
+            const v = scanResults[key];
+            if (!v || typeof v !== 'object') return;
+            const meta = v.meta;
+            if (!meta || typeof meta !== 'object' || !meta.tool) return;
+            out.push({
+                key:         key,
+                name:        meta.tool,
+                category:    meta.category || '',
+                description: meta.description || '',
+                status:      v.status || 'unknown',
+                raw:         typeof v.raw_output === 'string' ? v.raw_output : '',
+                error:       v.error || ''
+            });
+        });
+        out.sort((a, b) => (a.category || '').localeCompare(b.category || '')
+                        || a.key.localeCompare(b.key));
+        return out;
+    }
+
+    function toolStatusClass(status) {
+        const s = (status || '').toLowerCase();
+        if (s === 'success') return 'tool-status-ok';
+        if (s === 'error' || s === 'unreachable') return 'tool-status-err';
+        return 'tool-status-warn';
+    }
+
+    const RAW_EXCERPT_LIMIT = 4000;
+
+    /** Section repliable « Données brutes par outil ». */
+    function renderRawTools(tools) {
+        if (!tools || tools.length === 0) return '';
+
+        const items = tools.map(t => {
+            const truncated = t.raw.length > RAW_EXCERPT_LIMIT;
+            const excerpt   = truncated ? t.raw.slice(0, RAW_EXCERPT_LIMIT) : t.raw;
+            const body = excerpt
+                ? `<pre>${escHtml(excerpt)}${truncated
+                        ? `<span class="raw-truncated">… extrait tronqué (${t.raw.length.toLocaleString('fr-FR')} caractères au total) — export JSON pour la sortie complète</span>`
+                        : ''}</pre>`
+                : `<pre>${escHtml(t.error) || '(aucune sortie brute)'}</pre>`;
+
+            return `<details class="tool-raw">
+                <summary>
+                    <span class="tool-key">${escHtml(t.key)}</span>
+                    <span>${escHtml(t.name)}</span>
+                    <span class="tool-cat">${escHtml(t.category)}</span>
+                    <span class="${toolStatusClass(t.status)}">${escHtml(t.status)}</span>
+                </summary>
+                ${body}
+            </details>`;
+        }).join('');
+
+        return `<div class="modal-section">
+            <div class="modal-section-title"><i class="fas fa-database"></i> Données brutes par outil (${tools.length})</div>
+            <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:0.6rem">
+                Sortie exacte de chaque outil passif, telle que stockée — base vérifiable des conclusions IA.
+            </div>
+            ${items}
+        </div>`;
+    }
+
+    const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+
+    /**
+     * Normalise une sévérité vers la liste blanche.
+     *
+     * Indispensable : la valeur provient de la sortie du modèle IA et est
+     * interpolée dans un attribut `class`. Une valeur arbitraire permettrait
+     * de sortir de l'attribut et d'injecter du HTML — escHtml ne protège que
+     * le contenu textuel, pas la structure de l'attribut.
+     */
+    function safeSeverity(value) {
+        const s = String(value || '').toUpperCase();
+        return SEVERITIES.includes(s) ? s : 'INFO';
+    }
+
+    /**
+     * Statuts du contrôle d'ancrage (utils/grounding_check.py, backend). Ce
+     * champ est calculé côté serveur, pas généré par le LLM — mais on
+     * applique la même liste blanche par défense en profondeur avant de
+     * l'interpoler dans un attribut `class`, cohérent avec safeSeverity.
+     */
+    const GROUNDING_STATUSES = {
+        verified:             { label: 'Ancrage vérifié',        icon: 'fa-circle-check' },
+        evidence_not_found:   { label: 'Preuve non retrouvée',   icon: 'fa-triangle-exclamation' },
+        tool_not_successful:  { label: "Outil source en échec",  icon: 'fa-circle-exclamation' },
+        unknown_tool:         { label: 'Outil source inconnu',   icon: 'fa-circle-question' },
+        no_source_cited:      { label: 'Aucun outil cité',       icon: 'fa-circle-question' },
+        no_evidence_text:     { label: 'Aucune preuve fournie',  icon: 'fa-circle-question' },
+    };
+
+    function groundingBadge(grounding) {
+        const status = grounding && GROUNDING_STATUSES[grounding.status] ? grounding.status : null;
+        if (!status) return '';
+        const meta = GROUNDING_STATUSES[status];
+        return `<span class="grounding-badge ${status}" title="Contrôle d'ancrage automatique — vérifie que la preuve citée provient réellement de l'outil source, pas l'exactitude de l'interprétation">
+                    <i class="fas ${meta.icon}" style="font-size:0.6rem"></i> ${escHtml(meta.label)}</span>`;
+    }
+
+    /**
+     * Contrôle de couverture (utils/coverage_check.py) — un résumé, pas une
+     * liste par finding comme grounding_check : coverage_pct est un plancher
+     * (voir docstring backend), affiché comme tel plutôt que comme une
+     * mesure exacte.
+     */
+    function renderCoverageCheck(cov) {
+        if (!cov || typeof cov !== 'object') return '';
+        const pct = cov.coverage_pct;
+        const pctClass = pct == null ? 'dim' : (pct >= 90 ? 'green' : pct >= 60 ? 'orange' : 'red');
+        const unreferenced = Array.isArray(cov.tools_unreferenced) ? cov.tools_unreferenced : [];
+
+        let html = `<div class="modal-section">
+            <div class="modal-section-title"><i class="fas fa-magnifying-glass-chart"></i> Contrôle de couverture de l'analyse</div>
+            <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+                <div><span class="score-pill ${pctClass}">${pct != null ? pct + '%' : '—'}</span>
+                    <div style="font-size:.75rem;color:var(--text-dim)">Outils interprétés (≥ valeur affichée)</div></div>
+                <div><strong>${cov.rag_snippets_used ?? 0}</strong> / ${cov.rag_snippets_available ?? 0}
+                    <div style="font-size:.75rem;color:var(--text-dim)">Extraits RAG cités dans une recommandation</div></div>
+                <div><strong>${cov.findings_citing_web_source ?? 0}</strong> / ${cov.findings_total ?? 0}
+                    <div style="font-size:.75rem;color:var(--text-dim)">Findings citant une source web (${cov.web_searches_performed ?? 0} recherche(s) effectuée(s))</div></div>
+            </div>`;
+
+        if (unreferenced.length > 0) {
+            html += `<div style="font-size:.85rem;color:var(--text-dim)">
+                <i class="fas fa-triangle-exclamation" style="color:#f59e0b"></i>
+                Outils avec données non référencés dans l'analyse : ${unreferenced.map(escHtml).join(', ')}
+            </div>`;
+        }
+        html += `</div>`;
+        return html;
+    }
+
+    /** Findings de l'analyse IA, avec l'outil source affiché à côté de chacun. */
+    function renderFindings(findings, toolIndex, groundingSummary) {
+        if (!Array.isArray(findings) || findings.length === 0) return '';
+
+        const gsHtml = (groundingSummary && groundingSummary.total_findings)
+            ? `<div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:0.6rem">
+                   Contrôle d'ancrage automatique : ${escHtml(groundingSummary.verified)}/${escHtml(groundingSummary.total_findings)}
+                   findings (${escHtml(groundingSummary.verified_pct)}%) ont une preuve retrouvée dans la donnée brute
+                   de l'outil cité — vérifie l'ancrage factuel, pas l'exactitude de l'interprétation IA.
+               </div>`
+            : '';
+
+        const items = findings.map(f => {
+            const sev = safeSeverity(f.severity);
+            const src = f.source_tool || '';
+            const tool = src && toolIndex[src] ? toolIndex[src] : null;
+            const srcBadge = src
+                ? `<span class="src-tool-badge" title="${escHtml(tool ? tool.name + ' — ' + tool.category : 'Outil source')}">
+                       <i class="fas fa-link" style="font-size:0.6rem"></i> ${escHtml(src)}</span>`
+                : '';
+            const extraSrc = Array.isArray(f.source_tools) && f.source_tools.length > 1
+                ? `<span class="tool-cat">+ ${f.source_tools.length - 1} autre(s) outil(s)</span>`
+                : '';
+            const groundingBadgeHtml = groundingBadge(f.grounding);
+
+            return `<div class="finding-item">
+                <div class="finding-head">
+                    <span class="sev-pill ${sev}">${escHtml(sev)}</span>
+                    <span class="finding-title">${escHtml(f.title || f.id || '—')}</span>
+                    ${srcBadge}
+                    ${extraSrc}
+                    ${groundingBadgeHtml}
+                </div>
+                ${f.description ? `<div class="finding-desc">${escHtml(f.description)}</div>` : ''}
+                ${f.evidence ? `<div class="finding-desc" style="margin-top:0.3rem"><em>Preuve :</em> ${escHtml(f.evidence)}</div>` : ''}
+            </div>`;
+        }).join('');
+
+        return `<div class="modal-section">
+            <div class="modal-section-title"><i class="fas fa-triangle-exclamation"></i> Findings (${findings.length})</div>
+            ${gsHtml}
+            ${items}
+        </div>`;
+    }
+
+    function timingValue(d) {
+        if (d.scan_duration_s != null) return d.scan_duration_s;
+        const computed = diffSeconds(d.started_at, d.completed_at);
+        return computed != null ? computed : d.execution_time;
+    }
+
+    /**
+     * `risk_level` provient de la sortie du modèle IA et était interpolé sans
+     * échappement, à la fois dans l'attribut `class` et dans le contenu.
+     * .toUpperCase() ne protège rien : les entités HTML numériques y survivent
+     * et sont décodées par le parseur avant l'évaluation JS. On applique donc
+     * la même liste blanche que pour les sévérités.
+     */
+    const RISK_LEVELS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+
+    function riskBadge(level) {
+        const l = String(level || '').toUpperCase();
+        const safe = RISK_LEVELS.includes(l) ? l : 'INFO';
+        return `<span class="badge score-pill risk-${safe}">${safe}</span>`;
+    }
+
+    function tryParseJson(str) {
+        try { return JSON.parse(str); } catch(_) { return null; }
+    }
+
+    function closeModal() {
+        document.getElementById('modal-overlay').classList.remove('open');
+        document.body.style.overflow = '';
+        _modalReconId = null;
+        _modalDomain  = null;
+        // Le bandeau décrit les outils de la recon consultée — on repasse au
+        // libellé générique pour ne pas laisser une info hors contexte.
+        updateMethodologyBanner(null);
+    }
+
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    document.getElementById('modal-btn-close').addEventListener('click', closeModal);
+    document.getElementById('modal-btn-dl').addEventListener('click', () => {
+        if (_modalReconId) downloadPdf(_modalReconId, _modalDomain || 'domain');
+    });
+    document.getElementById('modal-btn-json').addEventListener('click', () => {
+        if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'json');
+    });
+    document.getElementById('modal-btn-csv').addEventListener('click', () => {
+        if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'csv');
+    });
+    document.getElementById('modal-overlay').addEventListener('click', e => {
+        if (e.target === document.getElementById('modal-overlay')) closeModal();
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeModal();
+    });
+
+    /* ── STATS (tech) ───────────────────────────────────────── */
+    async function loadStats() {
+        try {
+            const resp = await apiFetch('/logs/stats');
+            if (!resp.success) return;
+            const d = resp.data;
+
+            document.getElementById('stat-total').textContent    = (d.total_requests || 0).toLocaleString('fr-FR');
+            document.getElementById('stat-2xx').textContent      = (d.by_status_class?.['2xx'] || 0).toLocaleString('fr-FR');
+            document.getElementById('stat-errors').textContent   = (d.error_count || 0).toLocaleString('fr-FR');
+            document.getElementById('stat-duration').textContent = d.avg_duration_ms != null ? d.avg_duration_ms.toFixed(1) : '—';
+
+            const sc = d.by_status_class || {};
+            const donutData = [sc['2xx']||0, sc['3xx']||0, sc['4xx']||0, sc['5xx']||0];
+            if (_chartStatus) {
+                _chartStatus.data.datasets[0].data = donutData; _chartStatus.update();
+            } else {
+                _chartStatus = new Chart(document.getElementById('chart-status'), {
+                    type: 'doughnut',
+                    data: { labels: ['2xx','3xx','4xx','5xx'], datasets: [{
+                        data: donutData,
+                        backgroundColor: ['#00ff8840','#00d4ff40','#f59e0b40','#f43f5e40'],
+                        borderColor:     ['#00ff88','#00d4ff','#f59e0b','#f43f5e'],
+                        borderWidth: 2, hoverOffset: 6
+                    }]},
+                    options: { responsive:true, maintainAspectRatio:true, cutout:'68%',
+                        plugins: { legend: { position:'bottom', labels:{ color:'#94a3b8', font:{size:11}, padding:12 } } } }
+                });
+            }
+
+            const eps = (d.top_endpoints || []).slice(0, 8);
+            const epLabels = eps.map(e => e.endpoint), epCounts = eps.map(e => e.count);
+            if (_chartEndpoints) {
+                _chartEndpoints.data.labels = epLabels;
+                _chartEndpoints.data.datasets[0].data = epCounts;
+                _chartEndpoints.update();
+            } else {
+                _chartEndpoints = new Chart(document.getElementById('chart-endpoints'), {
+                    type: 'bar',
+                    data: { labels: epLabels, datasets: [{ label:'Appels', data: epCounts,
+                        backgroundColor:'#00d4ff30', borderColor:'#00d4ff', borderWidth:1, borderRadius:4 }]},
+                    options: { indexAxis:'y', responsive:true, maintainAspectRatio:true,
+                        plugins:{ legend:{ display:false } },
+                        scales: {
+                            x:{ grid:{ color:'rgba(0,212,255,0.06)' }, ticks:{ color:'#94a3b8', font:{size:11} } },
+                            y:{ grid:{ display:false }, ticks:{ color:'#94a3b8', font:{size:11, family:"'Fira Code', monospace"} } }
+                        }
+                    }
+                });
+            }
+
+            const errs = (d.top_errors || []).slice(0, 5);
+            const errList = document.getElementById('errors-list');
+            errList.innerHTML = errs.length === 0
+                ? '<div class="empty-state"><i class="fas fa-circle-check"></i> Aucune erreur enregistrée</div>'
+                : errs.map(e => `
+                    <div class="error-item">
+                        <span class="error-ep">${escHtml(e.endpoint)}</span>
+                        <span>${statusBadge(e.status_code)}</span>
+                        <span class="error-count">${e.count}×</span>
+                    </div>`).join('');
+        } catch (err) { console.error('loadStats', err); }
+    }
+
+    /* ── LOGS TABLE ─────────────────────────────────────────── */
+    async function loadLogs(page) {
+        page = page || 1;
+        _currentPage = page;
+        const method = document.getElementById('filter-method').value;
+        const statusClass = document.getElementById('filter-status').value;
+        let qs = `?page=${page}&per_page=${PER_PAGE}`;
+        if (method) qs += `&method=${encodeURIComponent(method)}`;
+        if (statusClass) qs += `&status_class=${encodeURIComponent(statusClass)}`;
+
+        const tbody = document.getElementById('logs-tbody');
+        tbody.innerHTML = `<tr><td colspan="7" style="padding:2rem;text-align:center;color:#64748b"><span class="loading-spinner"></span> Chargement…</td></tr>`;
+
+        try {
+            const resp = await apiFetch('/logs' + qs);
+            if (!resp.success) return;
+
+            _totalLogPages = resp.pages || 1;
+            document.getElementById('logs-count').textContent     = `${resp.total.toLocaleString('fr-FR')} entrée(s)`;
+            document.getElementById('logs-page-info').textContent = `Page ${resp.page} / ${resp.pages}`;
+            document.getElementById('btn-logs-prev').disabled = page <= 1;
+            document.getElementById('btn-logs-next').disabled = page >= resp.pages;
+
+            if (resp.data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i> Aucun log trouvé</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = resp.data.map(row => {
+                const dur = row.duration_ms != null ? row.duration_ms.toFixed(1) : '—';
+                return `<tr>
+                    <td>${row.id}</td>
+                    <td>${methodBadge(row.method)}</td>
+                    <td style="font-family:'Fira Code',monospace;max-width:250px;overflow:hidden;text-overflow:ellipsis" title="${escHtml(row.endpoint)}">${escHtml(row.endpoint)}</td>
+                    <td>${statusBadge(row.status_code)}</td>
+                    <td>${dur}</td>
+                    <td>${escHtml(row.ip_address || '—')}</td>
+                    <td>${formatDate(row.created_at)}</td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><i class="fas fa-circle-exclamation"></i> Erreur</td></tr>`;
+            console.error('loadLogs', err);
+        }
+    }
+
+    /* ── REFRESH ────────────────────────────────────────────── */
+    async function refreshAll() {
+        const btn = document.getElementById('btn-refresh');
+        btn.innerHTML = '<span class="loading-spinner"></span> Chargement…';
+        btn.disabled = true;
+        try {
+            await Promise.all([
+                loadReconStats(), loadReports(_currentReconPage),
+                loadStats(), loadLogs(_currentPage)
+            ]);
+        } finally {
+            btn.innerHTML = '<i class="fas fa-rotate-right"></i> Actualiser';
+            btn.disabled = false;
+        }
+    }
+
+    function toggleAutoRefresh() {
+        const btn = document.getElementById('btn-autorefresh');
+        const dot = document.getElementById('auto-dot');
+        if (_autoRefreshTimer) {
+            clearInterval(_autoRefreshTimer); _autoRefreshTimer = null;
+            btn.classList.remove('active'); dot.style.display = 'none';
+            btn.innerHTML = 'Auto';
+        } else {
+            _autoRefreshTimer = setInterval(refreshAll, 30000);
+            btn.classList.add('active'); dot.style.display = 'inline-block';
+            btn.innerHTML = '<span class="refresh-dot"></span> Auto ✓';
+        }
+    }
+
+    /* ── LOGIN ──────────────────────────────────────────────── */
+    async function handleLogin(e) {
+        e.preventDefault();
+        const loginErr = document.getElementById('login-error');
+        loginErr.style.display = 'none';
+
+        const url   = (document.getElementById('api-url').value.trim() || API_BASE_DEFAULT).replace(/\/$/, '');
+        const email = document.getElementById('api-email').value.trim();
+        const pass  = document.getElementById('api-pass').value;
+        if (!email || !pass) { loginErr.style.display = 'block'; loginErr.textContent = 'Email et mot de passe requis.'; return; }
+
+        const btn = document.getElementById('btn-login');
+        btn.disabled = true; btn.textContent = 'Connexion…';
+
+        try {
+            const loginResp = await fetch(url + '/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ email, password: pass })
+            });
+            if (loginResp.status === 401) throw new Error('401');
+            if (!loginResp.ok) throw new Error(`HTTP ${loginResp.status}`);
+            const loginData = await loginResp.json();
+            if (!loginData.success) throw new Error('Réponse inattendue');
+
+            _apiBase    = url;
+            _authHeader = b64(email + ':' + pass);
+            document.getElementById('api-url-badge').textContent = url;
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('dashboard').style.display   = 'block';
+            await refreshAll();
+        } catch (err) {
+            _apiBase = ''; _authHeader = '';
+            loginErr.style.display = 'block';
+            loginErr.textContent = err.message === '401'
+                ? 'Identifiants invalides (401 Unauthorized).'
+                : 'Impossible de joindre l\'API. Vérifiez l\'URL et la connectivité.';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-right-to-bracket"></i> Accéder au dashboard';
+        }
+    }
+
+    function logout() {
+        if (_autoRefreshTimer) clearInterval(_autoRefreshTimer);
+        _apiBase = ''; _authHeader = ''; _currentPage = 1;
+        if (_chartStatus)    { _chartStatus.destroy();    _chartStatus = null; }
+        if (_chartEndpoints) { _chartEndpoints.destroy(); _chartEndpoints = null; }
+        if (_chartToolsReliability) { _chartToolsReliability.destroy(); _chartToolsReliability = null; }
+        if (_chartMitre)            { _chartMitre.destroy();            _chartMitre = null; }
+        document.getElementById('dashboard').style.display   = 'none';
+        document.getElementById('login-screen').style.display = 'flex';
+        document.getElementById('login-form').reset();
+    }
+
+    /* ── EVENT LISTENERS ────────────────────────────────────── */
+    document.querySelectorAll('.dash-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const target = tab.dataset.tab;
+            document.querySelectorAll('.dash-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById('tab-' + target).classList.add('active');
+            if (target === 'tech') {
+                if (_chartStatus)    _chartStatus.resize();
+                if (_chartEndpoints) _chartEndpoints.resize();
+                if (_chartToolsReliability) _chartToolsReliability.resize();
+                if (_chartMitre)            _chartMitre.resize();
+            }
+        });
+    });
+
+    document.getElementById('api-url').value = API_BASE_DEFAULT;
+    document.getElementById('login-form').addEventListener('submit', handleLogin);
+    document.getElementById('btn-refresh').addEventListener('click', refreshAll);
+    document.getElementById('btn-autorefresh').addEventListener('click', toggleAutoRefresh);
+    document.getElementById('btn-logout').addEventListener('click', logout);
+
+    // Délégation d'évènement pour le tableau (remplace les onclick inline)
+    document.getElementById('recon-tbody').addEventListener('click', e => {
+        const el = e.target.closest('[data-action]');
+        if (!el) return;
+        const id = parseInt(el.dataset.id, 10);
+        if (!Number.isInteger(id)) return;
+        if (el.dataset.action === 'open') openModal(id);
+        else if (el.dataset.action === 'pdf') {
+            const row = (_lastReconRows || []).find(r => r.id === id);
+            downloadPdf(id, (row && row.domain) || 'domain');
+        }
+    });
+
+    // Filtres reconnaissances
+    document.getElementById('btn-apply-recon-filters').addEventListener('click', () => { loadReconStats(); loadReports(1); });
+    document.getElementById('filter-recon-status').addEventListener('change', () => loadReports(1));
+    document.getElementById('filter-domain').addEventListener('keydown', e => { if (e.key === 'Enter') loadReports(1); });
+    document.getElementById('btn-recon-prev').addEventListener('click', () => { if (_currentReconPage > 1) loadReports(_currentReconPage - 1); });
+    document.getElementById('btn-recon-next').addEventListener('click', () => { if (_currentReconPage < _totalReconPages) loadReports(_currentReconPage + 1); });
+
+    // Filtres logs
+    document.getElementById('btn-apply-filters').addEventListener('click', () => loadLogs(1));
+    ['filter-method','filter-status'].forEach(id => document.getElementById(id).addEventListener('change', () => loadLogs(1)));
+    document.getElementById('btn-logs-prev').addEventListener('click', () => { if (_currentPage > 1) loadLogs(_currentPage - 1); });
+    document.getElementById('btn-logs-next').addEventListener('click', () => { if (_currentPage < _totalLogPages) loadLogs(_currentPage + 1); });
+
+})();
+</script>
+</body>
+</html>

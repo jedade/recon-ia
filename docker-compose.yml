@@ -1,73 +1,216 @@
 version: '3.9'
 
 services:
-  nginx:
-    image: nginx:alpine
-    container_name: nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
-    depends_on:
-      - web
-      - api
-      - ollama
-    restart: unless-stopped
 
   web:
     image: nginx:alpine
     container_name: web
+    ports:
+      - "5000:80"
+    environment:
+      # Consommé par web/templates/config.js.template via le mécanisme
+      # envsubst intégré à l'image nginx officielle (docker-entrypoint.d) :
+      # régénère web/config.js à CHAQUE démarrage du conteneur, avant nginx.
+      # Vide par défaut → dashboard.html retombe sur l'URL de prod codée en
+      # dur. Mettre l'URL joignable par le NAVIGATEUR (pas un nom de service
+      # Docker) : http://localhost:8080 en local, https://api.idachallenge.bj
+      # en prod.
+      - DASHBOARD_API_BASE=${DASHBOARD_API_BASE:-}
+      # Même principe pour web/index.html (formulaire public) : URL du webhook
+      # n8n JOIGNABLE PAR LE NAVIGATEUR — jamais un nom de service Docker.
+      # http://localhost:5678/webhook/dfb160f6-daa7-4d3f-bd33-09f4a6797c65 en
+      # local (port publié par le service n8n), https://n8n.idachallenge.bj/...
+      # en prod. Vide par défaut → index.html retombe sur l'URL de prod codée
+      # en dur (voir web/index.html).
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-}
+      - NGINX_ENVSUBST_OUTPUT_DIR=/usr/share/nginx/html
     volumes:
       - ./web:/usr/share/nginx/html
-  
+      - ./web/templates:/etc/nginx/templates:ro
+
   api:
-    build: 
+    build:
       context: ./api
       dockerfile: Dockerfile
     container_name: api
-    expose:
-      - 8000
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./api/.env
     environment:
-      - FLASK_DEBUG=0
+      - OLLAMA_URL=http://ollama:11434
+      - ANALYSIS_MODEL=${ANALYSIS_MODEL:-qwen2.5:7b}
+      - ANALYSIS_MAX_SEARCH_ROUNDS=${ANALYSIS_MAX_SEARCH_ROUNDS:-6}
+      - ANALYSIS_LANG=${ANALYSIS_LANG:-fr}
+      # Stockage partagé du rate limiter entre les workers gunicorn.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
     volumes:
-      - ./api/main.py:/app/main.py
-      - ./api:/app 
-
-   
+      - ./api:/app
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   ollama:
     image: ollama/ollama
     container_name: ollama
     volumes:
       - ./ollama:/root/.ollama
+    # Port NON publié : Ollama n'a AUCUNE authentification. Exposé, il permet
+    # à quiconque de consommer le CPU/GPU (/api/generate) et de faire
+    # télécharger des modèles arbitraires (/api/pull → saturation disque).
     expose:
-      - 11434
+      - "11434"
     restart: unless-stopped
    
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n
+    # Image custom (n8n/Dockerfile) : ajoute bash+whois et un entrypoint qui
+    # provisionne automatiquement credentials + workflows recon-ia avant de
+    # démarrer n8n — voir n8n/provision-and-start.sh.
+    build:
+      context: ./n8n
+      dockerfile: Dockerfile
     container_name: n8n
+    # Pas d'`env_file: ./api/.env` ici : n8n n'a besoin que de DOMAIN_URL_API
+    # (injecté dans `environment:` ci-dessous). Lui donner le .env complet
+    # exposait SMTP_PASSWORD, les clés IA et ADMIN_PASSWORD_PLAIN.
     volumes:
       - ./n8n_data:/home/node/.n8n
+      - ./n8n_ressource:/tmp/n8n-source-docs
+      - ./n8n/workflows:/workflows:ro
+      # ATTENTION — NE PAS remonter /var/run/docker.sock ici.
+      # Le socket Docker donne un contrôle root complet sur l'HÔTE : un Code
+      # node (ou toute compromission de l'UI n8n) peut créer un conteneur
+      # privilégié montant `/` et s'échapper. Aucun workflow de ce projet n'en
+      # a besoin. Si une action Docker devient nécessaire, passer par un proxy
+      # socket filtré en lecture seule, jamais par le socket brut.
     environment:
-      - N8N_PORT=5678
-      - N8N_HOST="IP_ADDRESS"
-      - N8N_PROTOCOL=http
+      # L'accès $env reste autorisé (le workflow principal utilise
+      # {{ $env.DOMAIN_URL_API }}), mais n8n ne reçoit PLUS tout le .env de
+      # l'API : seules les variables réellement utilisées sont injectées
+      # ci-dessous. Auparavant, un Code node pouvait lire SMTP_PASSWORD, les
+      # clés IA et ADMIN_PASSWORD_PLAIN via $env — tout le trousseau pour
+      # une poignée de variables utiles.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - DOMAIN_URL_API=${DOMAIN_URL_API}
+      # Nécessaires à provision-and-start.sh pour créer la credential
+      # httpBasicAuth du nœud HTTP Request de recon-ia-main.json (voir
+      # generate-credentials.js). Sans elles, cette credential n'est jamais
+      # créée et le workflow principal échoue silencieusement en boucle.
+      #
+      # ATTENTION : avec N8N_BLOCK_ENV_ACCESS_IN_NODE=false ci-dessus et une
+      # UI n8n sans authentification (N8N_BASIC_AUTH_* jamais configurés),
+      # ADMIN_PASSWORD_PLAIN est lisible en clair depuis n'importe quel Code
+      # node — même exposition que POSTGRES_PASSWORD ci-dessous. Tant que
+      # l'UI n8n n'est pas authentifiée, ce mot de passe admin doit être
+      # traité comme public sur le réseau qui peut atteindre le port 5678.
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD_PLAIN=${ADMIN_PASSWORD_PLAIN}
+      # Nécessaires à provision-and-start.sh pour créer la credential
+      # Postgres du nœud RAG PGVector Store (voir generate-credentials.js).
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      # "Local File Trigger" (workflow RAG) est désactivé par défaut depuis
+      # n8n 2.0 pour raisons de sécurité — liste d'exclusion vide = réactivé.
+      - NODES_EXCLUDE=[]
+      # Sécurité récente de n8n : les nœuds fichiers (Read/Write Files from
+      # Disk...) sont restreints par défaut à ~/.n8n-files (constaté :
+      # "Access to the file is not allowed. Allowed paths: /home/node/.n8n-files"
+      # sur le workflow RAG). Séparateur ';' (PAS ',') — voir
+      # n8n-core/dist/execution-engine/.../file-system-helper-functions.js.
+      # Sans cette variable, l'ingestion RAG automatique (voir
+      # n8n/workflows/rag-ingestion.json) échoue systématiquement.
+      - N8N_RESTRICT_FILE_ACCESS_TO=/tmp/n8n-source-docs
+      # - N8N_PORT=5678
+      # - N8N_HOST=localhost
+      # - N8N_PROTOCOL=https
       #- N8N_PATH=/n8n
-      - WEBHOOK_TUNNEL_URL=IP_ADDRESS
-      #- WEBHOOK_URL=https://135.181.141.52/
-      - N8N_SECURE_COOKIE=false
-      - VUE_APP_URL_BASE_API=IP_ADDRESS
-      - NODE_ENV=production
-      - N8N_HOST=localhost
+      - WEBHOOK_TUNNEL_URL=https://n8n.idachallenge.bj
+      # #- WEBHOOK_URL=https://135.181.141.52/
+      - N8N_SECURE_COOKIE=true
+      - N8N_EXPRESS_TRUCT_PROXY=true
+      #- VUE_APP_URL_BASE_API=https://n8n.idachallenge.bj/n8n/
+      # - NODE_ENV=production
+      # #- N8N_HOST=localhost
       - N8N_RUNNERS_ENABLED=true
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
-      #- N8N_BASIC_AUTH_USER=jediel
-      #- N8N_BASIC_AUTH_PASSWORD=jediel
       - N8N_TRUST_PROXY=true
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_HOST_NAME=n8n.idachallenge.bj
+      - WEBHOOK_URL=https://n8n.idachallenge.bj/
+      - GENERIC_TIMEZONE=Europe/Paris
+      - EXECUTIONS_TIMEOUT=600000
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=3
+      - EXECUTIONS_DATA_PRUNE_INTERVAL=1440
+      - N8N_HOST=0.0.0.0
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_PUSH_BACKEND=websocket
+      - N8N_EDITOR_BASE_URL=https://n8n.idachallenge.bj
+      - NODE_ENV=production
+      # Port interne du réseau docker (11434), pas le port publié sur l'hôte
+      # (11435 — voir le service `ollama` ci-dessous) : depuis un autre
+      # conteneur, seul le port interne est joignable.
+      - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}
     ports:
       - "5678:5678"
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
+  redis:
+    # Stockage partagé du rate limiter (Flask-Limiter).
+    #
+    # Indispensable depuis le passage à gunicorn multi-workers : avec le
+    # stockage "memory://", chaque worker tient son propre compteur en RAM.
+    # Une limite de 20 requêtes/heure autoriserait donc 20 × nb_workers
+    # requêtes, et les compteurs seraient remis à zéro à chaque redémarrage.
+    image: redis:alpine
+    container_name: redis
+    # Aucun port publié : le service n'est joignable que sur le réseau interne
+    # compose. Redis n'a pas d'authentification activée par défaut — l'exposer
+    # sur l'hôte le rendrait accessible sans mot de passe.
+    expose:
+      - "6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    # pgvector/pgvector:pg16 = postgres:16 + extension pgvector préinstallée.
+    # Remplace le couple postgres:16-alpine + qdrant : le RAG n8n (cheat sheets
+    # OWASP, CWE/CAPEC, ASVS/WSTG…) est stocké dans la table rag_documents
+    # (voir api/migrate.py) plutôt que dans un service Qdrant séparé.
+    image: pgvector/pgvector:pg16
+    container_name: postgres
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    env_file:
+      - ./api/.env  # ← Charge POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD depuis .env
+    # Port NON publié sur l'hôte : la base contient PII, scan_results et PDF.
+    # L'exposer sur 0.0.0.0 en fait une cible de brute-force directe depuis
+    # Internet. Les autres conteneurs y accèdent par le réseau interne.
+    # Pour un accès local ponctuel : "127.0.0.1:5432:5432".
+    expose:
+      - "5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
