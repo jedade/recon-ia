@@ -1,10 +1,21 @@
 # utils/mitre_attack.py
 """
-Corrélation déterministe outils OSINT → techniques MITRE ATT&CK (tactique
-Reconnaissance, TA0043, framework Enterprise v15).
+Corrélation déterministe outils OSINT → techniques MITRE ATT&CK (tactiques
+Reconnaissance TA0043 et Resource Development TA0042, framework Enterprise —
+version renvoyée par `attack_version()`, lue dans le référentiel local
+`api/data/attack_reference.json`).
+
+Référentiel local (phase 4 du plan) : `data/script_mitre_attack.py` extrait
+du bundle STIX officiel `mitre/cti` (enterprise-attack.json, ~50 Mo) un
+fichier JSON compact versionné dans le dépôt — noms des techniques, tactiques,
+mitigations (relations `mitigates`) et, à titre de contexte, nombre de
+groupes connus (relations `uses`). Le runtime ne lit QUE ce fichier : aucun
+appel réseau. `load_reference()` le charge une fois (cache mémoire) et
+revalide chaque identifiant (regex) : un fichier altéré ne peut pas injecter
+d'ID arbitraire dans un rapport.
 
 Ce module ne fait AUCUN appel réseau ni au framework ATT&CK complet (le
-bundle STIX complet fait ~30 Mo et ne se justifie pas pour ~47 outils) : il
+bundle STIX complet fait ~50 Mo et ne se justifie pas pour ~47 outils) : il
 s'agit d'un sous-ensemble curé et vérifié à la main, couvrant l'essentiel des
 outils de `routes/recon.py::ALL_TOOLS`. La correspondance outil → technique
 est un fait déterministe (documenté ci-dessous avec sa source), jamais
@@ -20,7 +31,111 @@ que de répéter le texte générique ATT&CK.
 
 Référence : https://attack.mitre.org/tactics/TA0043/
 """
-from typing import Any, Dict, List
+import json
+import logging
+import os
+import re
+import threading
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# Identifiants ATT&CK au format strict (technique, sous-technique, mitigation,
+# tactique, groupe). Tout ID qui ne correspond pas est rejeté, d'où qu'il vienne.
+TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+MITIGATION_ID_RE = re.compile(r"^M\d{4}$")
+TACTIC_ID_RE = re.compile(r"^TA\d{4}$")
+GROUP_ID_RE = re.compile(r"^G\d{4}$")
+
+REFERENCE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "attack_reference.json"
+)
+
+_ref_lock = threading.Lock()
+_ref_cache: Dict[str, Any] = {}
+
+
+def _clean_text(value: Any, limit: int = 200) -> str:
+    """Texte court du référentiel : caractères de contrôle retirés, longueur bornée."""
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", str(value or "")).strip()
+    return text[:limit]
+
+
+def _validate_reference(raw: Any) -> Optional[Dict[str, Any]]:
+    """
+    Revalide le référentiel chargé : seules les entrées dont l'ID respecte le
+    format ATT&CK sont conservées, les textes sont bornés. Retourne None si la
+    structure est inutilisable.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("techniques"), dict):
+        return None
+    mitigations = {}
+    for mid, meta in (raw.get("mitigations") or {}).items():
+        if isinstance(mid, str) and MITIGATION_ID_RE.match(mid) and isinstance(meta, dict):
+            mitigations[mid] = {"name": _clean_text(meta.get("name"), 120)}
+    tactics = {}
+    for tid, meta in (raw.get("tactics") or {}).items():
+        if isinstance(tid, str) and TACTIC_ID_RE.match(tid) and isinstance(meta, dict):
+            short = _clean_text(meta.get("shortname"), 40)
+            if re.match(r"^[a-z-]+$", short):
+                tactics[tid] = {"name": _clean_text(meta.get("name"), 60), "shortname": short}
+    shortnames = {t["shortname"] for t in tactics.values()}
+    techniques = {}
+    for tid, meta in raw["techniques"].items():
+        if not (isinstance(tid, str) and TECHNIQUE_ID_RE.match(tid) and isinstance(meta, dict)):
+            continue
+        techniques[tid] = {
+            "name":        _clean_text(meta.get("name"), 160),
+            "tactics":     [t for t in (meta.get("tactics") or []) if t in shortnames],
+            "mitigations": [m for m in (meta.get("mitigations") or []) if m in mitigations],
+            "groups_count": meta["groups_count"] if isinstance(meta.get("groups_count"), int) and meta["groups_count"] > 0 else 0,
+            "groups_sample": [_clean_text(g, 60) for g in (meta.get("groups_sample") or [])[:5]],
+        }
+    return {
+        "attack_version": _clean_text(raw.get("attack_version"), 20) or "inconnue",
+        "domain":         _clean_text(raw.get("domain"), 40) or "enterprise-attack",
+        "generated_at":   _clean_text(raw.get("generated_at"), 40),
+        "source":         _clean_text(raw.get("source"), 200),
+        "tactics":        tactics,
+        "techniques":     techniques,
+        "mitigations":    mitigations,
+    }
+
+
+def load_reference(path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Référentiel ATT&CK local (voir docstring du module), chargé une fois.
+    En cas d'absence ou de corruption du fichier : référentiel VIDE (aucune
+    technique reconnue — fail closed, jamais d'ID non vérifié) + erreur
+    journalisée.
+    """
+    target = path or REFERENCE_PATH
+    with _ref_lock:
+        cached = _ref_cache.get(target)
+        if cached is not None:
+            return cached
+        try:
+            with open(target, "r", encoding="utf-8") as fh:
+                ref = _validate_reference(json.load(fh))
+        except Exception as e:
+            logger.error("[mitre] Référentiel ATT&CK illisible (%s) : %s", target, e)
+            ref = None
+        if ref is None:
+            ref = {"attack_version": "inconnue", "domain": "enterprise-attack", "generated_at": "",
+                   "source": "", "tactics": {}, "techniques": {}, "mitigations": {}}
+        _ref_cache[target] = ref
+        return ref
+
+
+def _reset_reference_cache() -> None:
+    """Tests uniquement."""
+    with _ref_lock:
+        _ref_cache.clear()
+
+
+def attack_version() -> str:
+    """Version ATT&CK Enterprise du référentiel local (ex. « 18.0 »)."""
+    return load_reference()["attack_version"]
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -96,6 +211,32 @@ TECHNIQUES: Dict[str, Dict[str, Any]] = {
                   "public — traiter tout CVE listé ici comme prioritaire, il est trivialement "
                   "trouvable par un attaquant.",
     },
+    # Phase 5 : techniques des nouveaux outils passifs
+    "T1593": {
+        "name": "Search Open Websites/Domains",
+        "tactic_id": "TA0043", "tactic": "Reconnaissance",
+        "advice": "Surveiller la présence du domaine dans les listes de menaces publiques "
+                  "(Safe Browsing, PhishTank) : un signalement y est visible de tous, attaquants compris.",
+    },
+    "T1593.001": {
+        "name": "Search Open Websites/Domains: Social Media",
+        "tactic_id": "TA0043", "tactic": "Reconnaissance",
+        "advice": "Relire les balises Open Graph/Twitter et les liens sortants de la page d'accueil : "
+                  "ils révèlent comptes sociaux et prestataires tiers utilisables en ingénierie sociale.",
+    },
+    "T1596": {
+        "name": "Search Open Technical Databases",
+        "tactic_id": "TA0043", "tactic": "Reconnaissance",
+        "advice": "Classements, réputation et listes de blocage sont publics : vérifier régulièrement "
+                  "comment le domaine y apparaît et corriger les signalements légitimes.",
+    },
+    "T1552.001": {
+        "name": "Unsecured Credentials: Credentials In Files",
+        "tactic_id": "TA0006", "tactic": "Credential Access",
+        "note": "Risque projeté : des secrets publiés dans du code public sont directement réutilisables.",
+        "advice": "Révoquer puis faire tourner immédiatement tout secret trouvé dans un dépôt public, "
+                  "purger l'historique et activer le secret scanning.",
+    },
     "T1589.002": {
         "name": "Gather Victim Identity Information: Email Addresses",
         "tactic_id": "TA0043", "tactic": "Reconnaissance",
@@ -106,15 +247,24 @@ TECHNIQUES: Dict[str, Dict[str, Any]] = {
     "T1584.001": {
         "name": "Compromise Infrastructure: Domains",
         "tactic_id": "TA0042", "tactic": "Resource Development",
-        "note": "Risque projeté, pas une technique de reconnaissance : soit un sous-domaine "
+        "note": "Risque projeté, pas une technique de reconnaissance : un sous-domaine "
                 "vulnérable au takeover peut être détourné pour héberger du phishing sous le nom "
-                "de la victime, soit un domaine imitant la marque a déjà été enregistré par un "
-                "tiers (typosquatting).",
-        "advice": "Sous-domaine : retirer l'enregistrement DNS orphelin ou reprendre possession de "
-                  "la ressource cloud pointée immédiatement — un takeover actif est une urgence, pas "
-                  "juste un finding. Typosquatting : surveiller les domaines suspects avec MX "
-                  "configuré (campagne active probable) et envisager un dépôt UDRP si l'usage est "
-                  "manifestement malveillant.",
+                "de la victime.",
+        "advice": "Retirer l'enregistrement DNS orphelin ou reprendre possession de la ressource "
+                  "cloud pointée immédiatement — un takeover actif est une urgence, pas juste un "
+                  "finding.",
+    },
+    # Phase 4 : le typosquatting relevait auparavant de T1584.001 (Compromise
+    # Infrastructure). Un domaine imitant la marque est ENREGISTRÉ par un tiers,
+    # il n'est pas compromis : la technique exacte est T1583.001 (Acquire
+    # Infrastructure: Domains).
+    "T1583.001": {
+        "name": "Acquire Infrastructure: Domains",
+        "tactic_id": "TA0042", "tactic": "Resource Development",
+        "note": "Risque projeté : des domaines imitant la marque ont été enregistrés par des tiers "
+                "(typosquatting) et peuvent servir de support à du phishing.",
+        "advice": "Surveiller les domaines suspects avec MX configuré (campagne active probable) "
+                  "et envisager un dépôt UDRP si l'usage est manifestement malveillant.",
     },
 }
 
@@ -157,7 +307,7 @@ TOOL_TECHNIQUES: Dict[str, List[str]] = {
     "shodan_internetdb":   ["T1596.005"],
     "xposedornot_breaches": ["T1589.002"],
     "subdomain_takeover":  ["T1584.001"],
-    "typosquatting":       ["T1584.001"],
+    "typosquatting":       ["T1583.001"],
     "gau_urls":            ["T1594"],
     "urlscan_search":      ["T1593.002"],
     "dmarc_check":         ["T1590.002"],
@@ -168,6 +318,16 @@ TOOL_TECHNIQUES: Dict[str, List[str]] = {
     "dane_check":          ["T1596.003"],
     "http_observatory":    ["T1592.002"],
     "abuseipdb_check":     ["T1590.005"],
+    # Phase 5 — collecte passive enrichie
+    "dns_mass":            ["T1590.002", "T1590.005", "T1596.001", "T1590.001"],
+    "blocklists":          ["T1596.001"],
+    "threats_check":       ["T1596", "T1593"],
+    "web_metadata":        ["T1593.001", "T1592.002"],
+    "site_ranking":        ["T1590.001", "T1596"],
+    "virustotal":          ["T1596.001", "T1596.005", "T1590.005"],
+    "dnsdumpster":         ["T1590.002", "T1596.001", "T1590.005"],
+    "grayhatwarfare":      ["T1596", "T1593.003"],
+    "github_dorks":        ["T1593.003", "T1552.001"],
 }
 
 

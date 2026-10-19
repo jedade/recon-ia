@@ -1,0 +1,22 @@
+{
+  "id": "mta_sts",
+  "titre": "MTA-STS et TLS-RPT — chiffrement imposé du courrier entrant",
+  "categorie": "Messagerie",
+  "outils": ["mta_sts_check", "tlsrpt_check"],
+  "pourquoi": "Entre serveurs de messagerie, le chiffrement STARTTLS est opportuniste : un attaquant placé sur le chemin réseau peut supprimer l'offre de chiffrement et lire le courrier en clair. MTA-STS publie une politique (enregistrement DNS _mta-sts et fichier HTTPS mta-sts.txt) qui oblige les serveurs émetteurs compatibles à utiliser TLS avec un certificat valide vers vos serveurs MX. TLS-RPT permet de recevoir des rapports sur les échecs de connexion TLS.",
+  "risque": "Sans MTA-STS, le courrier entrant peut être intercepté ou détourné par rétrogradation (downgrade) de STARTTLS ou par usurpation DNS des enregistrements MX. Sans TLS-RPT, ces échecs restent invisibles.",
+  "comment_corriger": [
+    "Vérifier que tous les serveurs MX présentent un certificat valide correspondant à leur nom.",
+    "Publier le fichier https://mta-sts.votre-domaine/.well-known/mta-sts.txt en mode testing, avec la liste des MX.",
+    "Publier l'enregistrement TXT _mta-sts.votre-domaine (v=STSv1; id=...).",
+    "Publier _smtp._tls.votre-domaine (v=TLSRPTv1; rua=mailto:...) pour recevoir les rapports.",
+    "Passer en mode enforce après analyse des rapports."
+  ],
+  "exemple": "_mta-sts.exemple.bj. TXT \"v=STSv1; id=20261019\"",
+  "references": [
+    {"titre": "RFC 8461 — SMTP MTA Strict Transport Security", "url": "https://www.rfc-editor.org/rfc/rfc8461"},
+    {"titre": "RFC 8460 — SMTP TLS Reporting", "url": "https://www.rfc-editor.org/rfc/rfc8460"},
+    {"titre": "CWE-319 — Cleartext Transmission of Sensitive Information", "url": "https://cwe.mitre.org/data/definitions/319.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

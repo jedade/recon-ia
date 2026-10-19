@@ -9,63 +9,79 @@ seulement annoncé dans les README.
 ## 1. Vue d'ensemble
 
 **Recon-IA** est une plateforme self-hosted de **reconnaissance passive OSINT
-assistée par IA**. Un utilisateur soumet un domaine + son email via le frontend,
-un workflow n8n orchestre le scan, l'API Flask exécute **47 outils OSINT
-passifs en parallèle**, des LLM (cloud ou local) analysent la surface d'attaque
-avec traçabilité outil → conclusion, puis un rapport PDF est généré et envoyé
-par email. Les données sont exportables (JSON + CSV) avec empreinte SHA-256
-pour un usage citable.
+assistée par IA**. Un utilisateur remplit le formulaire (domaine + email) et
+valide son email par OTP ; l'API déclenche alors le pipeline n8n, qui fait
+exécuter **47 outils OSINT passifs en parallèle**, analyser la surface
+d'attaque par des LLM (cloud ou local) avec traçabilité outil → conclusion,
+puis générer un rapport PDF. En fin de pipeline, les résultats sont
+**chiffrés** et le demandeur reçoit par mail un **code d'accès** (aucune
+pièce jointe) qui lui permet de consulter le rapport et de le télécharger en
+PDF, JSON ou CSV sur la page « Voir le résultat » (`web/result.html`). Les
+exports portent une empreinte SHA-256 pour un usage citable.
 
-Tout tourne via `docker-compose.yml` à la racine. Le déploiement de référence
-utilise le domaine `idachallenge.bj` (`n8n.idachallenge.bj`, `api.idachallenge.bj`).
+Tout tourne via `docker-compose.yml` à la racine, derrière **Caddy** (seul
+service publié sur Internet). Le déploiement de référence utilise le domaine
+`idachallenge.bj`.
 
 Langue du projet : **français** (docstrings, logs, commentaires, messages
 d'erreur API, rapports IA par défaut `ANALYSIS_LANG=fr`).
+
+**Feuille de route** : `docs/PLAN_ACTION.md` décrit les évolutions prévues
+(flux cible, phases, décisions prises et ouvertes). Ce fichier-ci reste la
+description de l'existant : reporter ici ce qui est livré.
 
 ---
 
 ## 2. Architecture
 
 ```
-Navigateur (web/index.html)
-   │  POST webhook
-   ▼
-n8n (5678)  ──orchestre──►  API Flask (8080, gunicorn)
-                                │
-       ┌────────────────────────┼──────────────┬───────────────┐
-       ▼                        ▼              ▼               ▼
-  PostgreSQL 16 + pgvector  47 outils OSINT  Redis        LLM en cascade
-  (recon, audit_log,        passifs, 2 vagues (rate         Gemini → Cerebras →
-   pass_recon_cache,        parallèles        limiter)      Groq → OpenRouter →
-   rag_documents)           (utils/parallel)                Ollama (local, 11434)
-                                                                    │
-                                                             recherche web
-                                                             (DuckDuckGo / Tavily)
+                Internet
+                   │  80/443
+            ┌──────▼───────┐
+            │    Caddy     │  TLS auto, retire X-Service-Token, IP client réelle
+            └──┬────────┬──┘
+   SITE_ADDRESS│        │API_ADDRESS
+         ┌─────▼──┐  ┌──▼───────────────────────┐
+         │  web   │  │ API Flask (gunicorn)     │◄──── jeton de service ─────┐
+         │ nginx  │  │ /recon /verify_email     │                            │
+         └────────┘  │ /results/* (code d'accès)│── webhook interne ──► n8n (privé)
+                     └──┬──────────┬──────────┬─┘   (X-Pipeline-Secret)    pipeline
+                        ▼          ▼          ▼
+       PostgreSQL 16 + pgvector   Redis      LLM en cascade + 47 outils OSINT
+       (recon chiffré, audit_log, (rate      Gemini → Cerebras → Groq → OpenRouter
+        pass_recon_cache,          limiter)  → Ollama local (11434)
+        rag_documents)
 ```
 
-Services réellement déclarés dans `docker-compose.yml` (**6**, aucun autre) :
+Services déclarés dans `docker-compose.yml` (**7**) :
 
 | Service    | Image / build            | Port | Rôle |
 |------------|--------------------------|------|------|
-| `web`      | `nginx:alpine`           | `5000:80` publié | sert `./web` en statique |
-| `api`      | build `./api`            | `8080:8080` publié | API Flask REST OSINT + IA + PDF (gunicorn) |
-| `postgres` | `pgvector/pgvector:pg16` | `expose 5432` — **non publié** | base principale + RAG vectoriel (healthcheck `pg_isready`) |
-| `ollama`   | `ollama/ollama`          | `expose 11434` — **non publié** | LLM local (dernier recours d'analyse) + embeddings RAG |
-| `n8n`      | build `./n8n`            | `5678:5678` publié | orchestration — image custom, provisionne credentials/workflows au démarrage |
-| `redis`    | `redis:alpine`           | `expose 6379` — **non publié** | stockage partagé du rate limiter Flask-Limiter (multi-workers gunicorn) |
+| `caddy`    | `caddy:2.8.4-alpine`     | **80/443 publiés** — seul service exposé | reverse proxy TLS (`caddy/Caddyfile`) devant `web` et `api` |
+| `web`      | `nginx:alpine`           | `expose 80` — non publié | sert `./web` en statique (via Caddy) |
+| `api`      | build `./api`            | `127.0.0.1:8080` (boucle locale) | API Flask REST OSINT + IA + PDF (gunicorn) |
+| `postgres` | `pgvector/pgvector:pg16` | `expose 5432` — non publié | base principale + RAG vectoriel (healthcheck `pg_isready`) |
+| `ollama`   | `ollama/ollama`          | `expose 11434` — non publié | LLM local (dernier recours d'analyse) + embeddings RAG |
+| `n8n`      | build `./n8n`            | `127.0.0.1:5678` (boucle locale) | orchestration — image custom, provisionne credentials/workflows au démarrage |
+| `redis`    | `redis:alpine`           | `expose 6379` — non publié | stockage partagé du rate limiter Flask-Limiter (multi-workers gunicorn) |
 
 Points à savoir :
-- **Aucun service `nginx` reverse-proxy ni `certbot` n'existe dans
-  `docker-compose.yml`**, alors que `scripts/init-letsencrypt.sh` fait
-  `docker compose up -d nginx` et `docker compose run --rm ... certbot`.
-  Ces scripts sont donc cassés en l'état (voir §8).
-- `nginx/conf.d/` et `nginx/ssl/` sont des **dossiers vides**
-  (`nginx/conf.d/default.conf` a été supprimé et n'est pas recommité).
-  `renew-certs.sh` à la racine est également un **dossier vide** (le vrai
-  script est `scripts/renew-certs.sh`).
-- `postgres`, `ollama` et `redis` n'exposent plus aucun port sur l'hôte : ils
-  sont joignables uniquement sur le réseau interne compose. C'est délibéré
-  (Ollama et Redis n'ont aucune authentification, Postgres contient des PII).
+- **Seul Caddy est joignable depuis Internet** (2026-10-19). `api` et `n8n`
+  ne sont publiés que sur `127.0.0.1` (diagnostic local ; éditeur n8n par
+  tunnel SSH `ssh -L 5678:127.0.0.1:5678 serveur`). Les anciens scripts
+  `scripts/init-letsencrypt.sh` / `renew-certs.sh` et les dossiers
+  `certbot/`, `nginx/`, `renew-certs.sh/` (cassés : ils visaient des
+  services absents du compose) ont été supprimés. Caddy obtient et renouvelle
+  seul les certificats quand `SITE_ADDRESS`/`API_ADDRESS` sont des noms de
+  domaine (préfixe `http://` = sans TLS, développement).
+- **Le navigateur ne parle qu'à l'API, jamais à n8n.** `POST /verify_email`
+  (public) déclenche le webhook n8n sur le réseau interne
+  (`utils/pipeline_trigger.py`, en-tête `X-Pipeline-Secret`) ; n8n rappelle
+  les routes du pipeline avec un **jeton de service** (`X-Service-Token`,
+  `utils/auth.py::require_service_or_auth`), plus avec le compte admin.
+- `postgres`, `ollama` et `redis` n'exposent aucun port sur l'hôte. C'est
+  délibéré (Ollama et Redis n'ont aucune authentification, Postgres contient
+  des PII).
 - `api` monte `./api:/app` en volume : le code est rechargé au redémarrage du
   conteneur, pas besoin de rebuild pour un changement Python (mais rebuild
   nécessaire si `requirements.txt` ou le `Dockerfile` change).
@@ -75,9 +91,7 @@ Points à savoir :
   cf. `data/script_*.py`) est stocké dans la table `rag_documents` de
   PostgreSQL (extension `pgvector`, voir `api/migrate.py` : colonnes
   `id/content/metadata/embedding`, embeddings `nomic-embed-text:v1.5` via
-  Ollama, 768 dim). Les répertoires `qdrant_data/` et `qdrant_config/`
-  **n'existent plus sur disque** (vérifié) ; seule une règle résiduelle
-  `qdrant_data/` subsiste dans `.gitignore`.
+  Ollama, 768 dim).
   ⚠️ **Le RAG est interrogé par l'API (`utils/rag_retrieval.py`), pas par
   n8n** — corrigé après un audit qui a trouvé `rag_documents` alimentée mais
   **jamais lue nulle part** (voir §8, section RAG, pour l'historique complet
@@ -85,8 +99,9 @@ Points à savoir :
 - Les deux workflows n8n (ingestion RAG + pipeline principal) sont **versionnés
   dans `n8n/workflows/*.json`** et **provisionnés + activés automatiquement** au
   démarrage du conteneur `n8n` par `n8n/provision-and-start.sh`. `docker compose up`
-  seul suffit, aucune étape manuelle dans l'éditeur n8n n'est nécessaire pour un
-  déploiement neuf. Détails et limites connues : §8.
+  seul suffit — sauf la création du compte propriétaire n8n, à faire
+  immédiatement (tant qu'il n'existe pas, le premier visiteur de l'éditeur
+  peut le créer).
 
 ---
 
@@ -94,28 +109,31 @@ Points à savoir :
 
 ```
 recon-ia/
-├── setup.sh                 # Lancement complet en 1 commande (voir §6) — génère les .env de dev,
-│                            #   build+up, attend postgres/api, pull le modèle Ollama, affiche les accès
+├── setup.sh                 # Lancement complet en 1 commande (voir §6) — génère les .env de dev
+│                            #   et les secrets, build+up, attend postgres/api, pull le modèle Ollama
+├── caddy/Caddyfile          # Reverse proxy TLS, seul service publié (voir §2)
 ├── api/                     # Backend Flask (le cœur du projet)
-├── web/                     # Frontend statique servi par nginx
+├── web/                     # Frontend statique servi par nginx (derrière Caddy)
+│   ├── index.html           # Formulaire public (+ widget Turnstile si configuré)
+│   ├── result.html/.css/.js # « Voir le résultat » : consultation par code d'accès
+│   ├── dashboard.html       # Console admin (métadonnées seulement pour un dossier scellé)
 │   ├── config.js            # GÉNÉRÉ à chaque démarrage du conteneur `web` (envsubst) — gitignoré
-│   └── templates/config.js.template  # Source : injecte DASHBOARD_API_BASE (voir §5, §7)
+│   └── templates/config.js.template  # Source : API_BASE + TURNSTILE_SITE_KEY (voir §7)
 ├── n8n/
 │   ├── Dockerfile                 # Image custom : provisioning auto (voir §8)
 │   ├── provision-and-start.sh     # Entrypoint : import credentials/workflows + exec n8n
 │   ├── generate-credentials.js    # Génère le JSON credentials depuis l'environnement
 │   └── workflows/                 # Workflows versionnés (source de vérité, pas la DB n8n)
 │       ├── rag-ingestion.json     # Ingestion RAG : fichiers → Postgres PGVector Store
-│       └── recon-ia-main.json     # Pipeline principal (webhook → … → rapport + email)
+│       └── recon-ia-main.json     # Pipeline principal (webhook interne → … → PDF + code d'accès)
 ├── n8n_data/                # État runtime n8n (database.sqlite, logs, nodes) — gitignoré
 ├── n8n_ressource/           # Corpus RAG monté dans n8n (/tmp/n8n-source-docs)
-├── n8n_certs/               # fullchain.pem + privkey.pem copiés depuis certbot — gitignoré
+├── caddy_data/, caddy_config/  # Certificats et état Caddy — gitignorés
 ├── ollama/                  # Volume modèles Ollama — gitignoré
 ├── postgres_data/           # Volume PostgreSQL (inclut rag_documents/pgvector) — gitignoré
-├── certbot/                 # conf + webroot Let's Encrypt (certbot/conf gitignoré)
-├── nginx/                   # conf.d/ et ssl/ VIDES (reverse proxy absent du compose)
-├── renew-certs.sh/          # dossier VIDE à la racine (artefact) — le script est dans scripts/
-├── scripts/                 # init-letsencrypt.sh, renew-certs.sh
+├── scripts/run-tests.sh     # Suite pytest dans un conteneur jetable sans réseau (voir §6)
+├── scripts/e2e/             # Tests navigateur : result.html (run-result-page.sh), parcours réel (run-full-flow.sh), dashboard (dashboard.mjs)
+├── docs/PLAN_ACTION.md      # Feuille de route (phases, décisions D1–D9)
 ├── data/                    # Scripts d'agrégation de corpus RAG (6 sources — voir §8)
 │   ├── github_md_aggregator.py   # Cœur commun réutilisé par script_asvs/wstg/owasp_top10/mitre_attack
 │   ├── script.py                 # OWASP Cheat Sheet Series
@@ -127,7 +145,7 @@ recon-ia/
 │   └── combined_*.md             # Sorties générées — copiées dans n8n_ressource/ pour l'ingestion
 ├── n8n-backup.tar.gz        # 87 octets — archive vide/tronquée (gitignorée)
 ├── docker-compose.yml
-├── .env                     # UNIQUEMENT pour l'interpolation ${VAR} du compose (voir §7)
+├── .env                     # Interpolation ${VAR} du compose + secrets partagés API/n8n (voir §7)
 └── README.md
 ```
 
@@ -144,15 +162,20 @@ migrate.py               # Migrations SQL idempotentes (CREATE/ALTER … IF NOT 
 entrypoint.sh            # réécrit /etc/resolv.conf → migrate.py → gunicorn (PLUS `python app.py`)
 generate_password_hash.py, test_smtp.py   # scripts utilitaires
 models/     recon.py · audit_log.py · pass_recon_cache.py
-routes/     __init__.py (register_routes) + 9 blueprints
-utils/      auth · validators · command_runner · parallel · web_search · email_sender
+routes/     __init__.py (register_routes) + 11 blueprints (dont results.py : consultation par code, cache.py : scans bruts admin)
+utils/      auth (admin Basic + jeton de service) · validators · command_runner · parallel
+            web_search · email_sender
             gemini_client · cerebras_client · groq_client · openrouter_client · ollama_client
             rag_retrieval (recherche pgvector — voir §5, §8)
             analysis_merger · final_report_generator · pdf_generator
             mitre_attack (corrélation outils exécutés → techniques ATT&CK, déterministe)
+            result_vault (code d'accès, chiffrement AES-GCM, sessions — voir §5)
+            captcha (Turnstile) · pipeline_trigger (API → webhook n8n interne)
+            retention (purge RGPD horaire, lancée par stale_scan_watchdog)
 errors/handlers.py       # 400/401/403/404/405/429/500 en JSON
 templates/redoc.html
-tests/                   # pytest : conftest + 11 fichiers de tests
+tests/                   # pytest : conftest + 19 fichiers de tests (marqueurs security/integration)
+Dockerfile.test          # image légère pour lancer pytest sans la stack (scripts/run-tests.sh)
 ```
 
 Il n'y a **plus** de `api/main.py`, `api/main.py.back`, `api/requirement`,
@@ -160,7 +183,27 @@ Il n'y a **plus** de `api/main.py`, `api/main.py.back`, `api/requirement`,
 
 ### `web/`
 
-- `index.html` — page publique, poste sur le webhook n8n (CSS/JS inlinés).
+- `index.html` — page publique : `POST /recon` (avec jeton Turnstile si
+  `TURNSTILE_SITE_KEY` est configurée) puis `POST /verify_email`, tous deux
+  sur l'API — plus aucun appel à n8n depuis le navigateur (CSS/JS inlinés).
+- `result.html` + `result.css` + `result.js` — « Voir le résultat » (phase 2,
+  design inspiré de web-check : fond `#141d2b`, accent `#9fef00`, PT Mono,
+  cartes à ombre décalée, masonry, thème clair automatique ou bouton ◐) :
+  saisie du code → `POST /results/access` → session en `sessionStorage`
+  (jamais le code) → rendu de `GET /results/report` : jauge score/note,
+  résumé, fiabilité (`grounding_check`/`coverage_check`), constats triés et
+  filtrables par sévérité avec lien vers la carte de leur `source_tool`,
+  points forts/actions, tableau ATT&CK, suivi des statuts d'outils, une carte
+  par outil (recherche + filtre par catégorie, modale d'explication depuis
+  `meta.description`/`meta.indicators`, sortie brute repliée),
+  téléchargements PDF/JSON/CSV par `fetch` + Blob. JS/CSS **séparés** pour
+  une CSP sans `unsafe-inline` ; rendu **uniquement** par
+  `textContent`/`createElement` (données tierces et texte LLM) — ne jamais
+  introduire `innerHTML` dans `result.js`. Testé dans Chrome par
+  `scripts/e2e/run-result-page.sh` (voir §6).
+- `dashboard.html` affiche pour un dossier scellé un cadenas (plus de bouton
+  PDF) et une section « Coffre des résultats » avec bouton « Révoquer le
+  code » (`POST /recon/<id>/revoke_access`).
 - `dashboard.html` — console admin qui parle directement à l'API
   (`API_BASE_DEFAULT = 'https://api.idachallenge.bj'`, login via `POST /auth/login`).
 - `docs.html` — documentation API en HTML statique.
@@ -205,6 +248,19 @@ status_forcelist=[429, 502, 503, 504])` limité aux méthodes idempotentes.
 Le pool est dimensionné sur `SCAN_MAX_WORKERS` pour ne pas sérialiser les
 threads de la vague parallèle.
 
+**Garde anti-SSRF de cette session (2026-10-19)** : la session est une
+`_SsrfGuardedSession`, dont `send()` passe l'hôte de **chaque** requête par
+`is_safe_domain` — y compris chaque saut de redirection, que `requests`
+envoie lui aussi via `send()`. Un hôte qui résout vers une adresse
+interne/réservée lève `UnsafeTargetError` (sous-classe de
+`RequestException`) sans qu'aucun octet ne parte. Ferme deux contournements
+réels : les sous-domaines découverts n'étaient jamais validés (seul le
+domaine saisi l'était, dans `pass_recon`), et les 5 appels
+`allow_redirects=True` suivaient une redirection vers `10.x`/`169.254.x`
+sans contrôle. Résultat mis en cache 30 s par hôte. Limite inchangée : DNS
+rebinding (voir §8). Tout nouvel outil HTTP doit passer par `_http`, jamais
+par `requests.get` directement, sous peine de perdre cette protection.
+
 **Auth** : HTTP Basic Auth uniquement, un seul compte admin défini par
 `ADMIN_EMAIL` + `ADMIN_PASSWORD` (hash werkzeug). Décorateur `@require_auth`
 dans `utils/auth.py`, comparaison du login via `hmac.compare_digest`.
@@ -238,17 +294,135 @@ identifiants (le dashboard réutilise ensuite le Basic Auth).
 
 ## 5. Flux applicatif et endpoints
 
-Pipeline nominal (seul `recon_id` circule à partir de l'étape 3) :
+Pipeline nominal (seul `recon_id` circule à partir de l'étape 3) — refondu le
+2026-10-19 (plan d'action, phase 1) :
 
-1. `POST /recon` → crée le dossier + envoie un OTP 6 chiffres (TTL `OTP_TTL_SECONDS`, 600 s)
-2. `POST /verify_email` → active le dossier (`start_report_date` horodaté)
-3. `POST /pass_recon` `{recon_id}` → scan OSINT, écrit `scan_results` en BD
-4. `POST /analyze` (ou `/analyze/async` + `/analyze/wait/<id>`) → analyse IA,
-   écrit `analysis_result` + `security_score`/`security_grade` + TTL cache
+1. `POST /recon` (public) → contrôle Turnstile (`utils/captcha.py`, si
+   `TURNSTILE_SECRET_KEY`), consentement `accord` **obligatoirement `true`**
+   (400 sinon — auparavant `false` était accepté et le scan tournait quand
+   même), crée le dossier + envoie un OTP 6 chiffres (TTL `OTP_TTL_SECONDS`,
+   600 s)
+2. `POST /verify_email` (**public** — n8n ne l'appelle plus) → valide l'OTP,
+   horodate `start_report_date`, puis **déclenche le webhook n8n en interne**
+   (`utils/pipeline_trigger.py`) : `status='running'`, `current_step='queued'`,
+   réponse `pipeline_started: true|false`. Après `OTP_MAX_ATTEMPTS` (5) codes
+   faux sur un même dossier, le code est annulé (`otp_attempts`) — la seule
+   limite par IP (10/h) laissait un attaquant réparti essayer les 10^6 codes.
+3. n8n (jeton de service) : `POST /pass_recon` `{recon_id}` → scan OSINT,
+   écrit `scan_results` en BD
+4. `POST /analyze/async` + `/analyze/wait/<id>` → analyse IA, écrit
+   `analysis_result` + `security_score`/`security_grade` + TTL cache
 5. `POST /recon/<id>/generate_final_report` → rapport narratif IA (`final_report`)
-6. `POST /recon/<id>/generate_report` → PDF stocké en BD + envoi email
-7. `GET /recon/<id>/report.pdf` → téléchargement
-8. `GET /recon/<id>/export.json` / `export.csv` → jeu de données citable
+6. `POST /recon/<id>/generate_report` → PDF stocké en BD, puis **scellement**
+   du dossier et mail « rapport prêt » contenant **uniquement le code
+   d'accès** (aucune pièce jointe, décision D1) — voir ci-dessous
+7. Le demandeur ouvre `web/result.html`, saisit son code :
+   `POST /results/access` → session, puis `GET /results/report`,
+   `/results/report.pdf`, `/results/export.json`, `/results/export.csv`
+
+Les routes admin `GET /recon/<id>/report.pdf`, `export.json`, `export.csv`
+existent toujours, mais répondent **403** (`results_sealed: true`) une fois
+le dossier scellé : le serveur ne peut plus en lire le contenu.
+
+### Coffre des résultats et consultation par code (2026-10-19)
+
+Décisions D1–D3 du plan d'action. Code : `utils/result_vault.py`,
+`routes/results.py`, `routes/report.py::_seal_and_notify`.
+
+- **Code d'accès** : `secrets.token_urlsafe(32)` (256 bits, 43 caractères),
+  envoyé une seule fois par mail, **jamais stocké ni journalisé**. Valable
+  `RESULTS_ACCESS_TTL_DAYS` (30 j), révocable (`POST /recon/<id>/revoke_access`,
+  admin).
+- **Recherche** : `access_token_hash = HMAC-SHA256(RESULTS_ACCESS_SECRET, code)`
+  (unique, indexé). **Déchiffrement** : `clé = HKDF-SHA256(code, access_salt)`.
+  Les deux usages sont séparés : l'empreinte ne permet pas de déchiffrer.
+- **Chiffrement** : `scan_results` + `analysis_result` + `final_report`
+  (compressés, dans `sealed_bundle`) et le PDF (`sealed_pdf`) en
+  AES-256-GCM, avec une donnée associée `recon-ia:v1:<id>:<champ>` qui lie
+  chaque chiffré à son dossier et à son champ (un chiffré recopié ailleurs
+  ne se déchiffre pas). Les colonnes en clair sont ensuite **vidées**.
+- **Ordre critique** : `seal_recon()` modifie le dossier sans commiter ; le
+  commit n'a lieu qu'**après l'envoi réussi du mail**. Si l'envoi échoue,
+  rollback : le dossier reste en clair, `email_error` est renvoyé, et l'admin
+  peut réessayer avec `POST /recon/<id>/issue_access`. Sans cela, un code
+  jamais reçu rendrait le rapport illisible à jamais. Un dossier déjà scellé
+  ne peut pas recevoir de nouveau code (409).
+- **`RESULTS_ACCESS_SECRET` absent** (< 32 caractères) : aucun code n'est
+  émis (fail closed), `email_error` le signale ; `POST /results/access`
+  répond 503. Ce secret est distinct de `SECRET_KEY`, qui retombe sur une
+  valeur aléatoire **par worker** quand il manque — ce repli casserait la
+  recherche d'un worker gunicorn à l'autre.
+- **Sessions** : `POST /results/access` (code dans le CORPS, jamais dans
+  l'URL ; 5/min et 30/h par IP) renvoie un jeton Fernet opaque de
+  `RESULTS_SESSION_TTL_SECONDS` (1 h) contenant l'id du dossier et la clé
+  dérivée. Chaque requête `GET /results/*` revalide l'état du dossier : une
+  révocation ou une expiration coupe les sessions ouvertes (403/410). Code
+  inconnu ou mal formé → toujours la même réponse 401 (pas d'oracle).
+  Le contenu n'est déchiffré qu'en mémoire, jamais réécrit dans les colonnes
+  du modèle (un commit ultérieur l'aurait remis en clair en base).
+- **Consentement** : `export.json`/`export.csv` exigent toujours `accord`.
+- **Admin** : `to_dict()` expose `results_sealed`, `access_state`
+  (`none|active|expired|revoked`), `access_expires_at`, `access_count`,
+  `last_access_at`, `results_purged_at` — jamais le code, l'empreinte ni le
+  sel. Les colonnes dénormalisées (score, findings, MITRE, outils, tokens)
+  restent en clair : le dashboard et `/recon/stats` fonctionnent sans le
+  contenu.
+- `send_report_email` (PDF en pièce jointe) a été **supprimée** :
+  `send_results_ready_email` la remplace (`risk_level` restreint à une
+  énumération avant d'entrer dans l'objet du mail).
+- `send_email: false` sur `generate_report` laisse le dossier en clair
+  (usage admin/tests : sans mail, personne ne détiendrait le code).
+
+### Purge RGPD (`utils/retention.py`, 2026-10-19)
+
+Lancée par la boucle du watchdog toutes les `RETENTION_INTERVAL_S` (1 h),
+idempotente (plusieurs workers sans effet de bord) :
+- code expiré/révoqué depuis `RESULTS_PURGE_GRACE_DAYS` (7 j) → contenu
+  chiffré effacé, prénom/nom/email/`requested_info` anonymisés
+  (`purged-<id>@anonymized.invalid`), `results_purged_at` horodaté ; domaine,
+  score et métriques conservés pour les statistiques ;
+- demandes jamais vérifiées de plus de `UNVERIFIED_RETENTION_DAYS` (7 j) →
+  supprimées ;
+- `audit_log` de plus de `AUDIT_RETENTION_DAYS` (90 j, adresses IP) →
+  supprimé ;
+- `pass_recon_cache` **n'est PAS purgé** (décision de l'utilisateur,
+  2026-10-19) : il garde en clair les résultats **bruts** du scan par domaine
+  (données publiques, sans analyse IA ni donnée du demandeur), hors du
+  chiffrement D3, et l'admin doit pouvoir les consulter. Une entrée expirée
+  (`expires_at` dépassé, 30 j) n'est plus servie au pipeline mais reste en
+  base et consultable ; elle est réécrite au prochain scan du même domaine.
+
+### Consultation admin du cache (`routes/cache.py`, 2026-10-19)
+
+`GET /cache` (liste paginée, filtres `domain` et `valid=true|false`, sans le
+résultat), `GET /cache/<id>` (résultat brut complet, `corrupted: true` si le
+JSON stocké est illisible), `GET /cache/<id>/export.json`. **Admin seul**
+(`require_auth`) — le jeton de service n'y donne pas accès (testé).
+Dashboard : onglet **« Scans bruts (cache) »** (tableau, filtres, détail dans
+la fenêtre habituelle avec les données brutes par outil, export JSON) et,
+dans le détail d'un dossier scellé, bouton **« Voir le scan brut (cache) »**
+qui ouvre l'entrée du même domaine : c'est le moyen pour l'admin de voir les
+données collectées d'un dossier dont le rapport n'est lisible qu'avec le
+code du demandeur. Tests : `tests/test_cache_admin.py`.
+
+### Phases 3 à 8 (2026-10-19) — vue d'ensemble
+
+Livrées en parallèle, une documentation détaillée par phase dans
+`docs/phases/PHASE_<n>.md` (règles, formats, variables, limites). Ce qui
+suit est ce qu'il faut savoir pour ne rien casser.
+
+| Phase | Modules | À retenir |
+|---|---|---|
+| 3 Fiabilité | `utils/severity_rules.py`, `utils/kev.py`, `utils/finding_sanitizer.py` (réécrit), `utils/rag_retrieval.py` (réécrit), `analyze.py::_prepare_phase3` / `_postprocess_report` | **La sévérité est décidée par 43 règles sur les données brutes, pas par le LLM** (`severity_llm` garde sa proposition, `severity_rule` dit quelle règle a tranché). Constat positif → toujours INFO ; finding contredit par la donnée → retiré ; finding sans règle → plafonné à MEDIUM ; constat ≥ HIGH oublié → ajouté (`generated_by: "rule"`). `risk_score = 100 − security_score`. CVE citée mais non observée par Shodan → retirée (B6) ; CVE dans CISA KEV → CRITICAL. `references` est désormais `[{collection, source}]` (les lecteurs acceptent encore l'ancien format chaîne). RAG : une requête par constat, filtrée par `metadata->>'collection'`, repli sans filtre |
+| 4 ATT&CK | `utils/attack_enablement.py`, `utils/mitre_attack.py`, `api/data/attack_reference.json` | Référentiel **v20.0** local, régénéré par `data/script_mitre_attack.py` (ajouter toute nouvelle technique à `REFERENCE_TECHNIQUES` puis régénérer — un test échoue sinon). `attack_enabled` / `mitigations` / `attack_rules` viennent **uniquement** de la table ; les ID du LLM sont écrasés. Chaîne d'attaque, layer Navigator (`GET /results/export.navigator.json`), section PDF |
+| 5 Collecte | `utils/passive_sources/*.py`, `utils/signals_extra.py` | 9 outils ; ceux à clé passent en `skipped` sans clé. Tout ce qui touche la cible passe par `_http` (anti-SSRF) ; réponses tierces bornées (2 Mo). `github_dorks` ne conserve jamais la valeur d'un secret. Signaux pour l'IA : `signals["passive_extra"]`, répartis par section pour Ollama (`ollama_client._build_section_data`) |
+| 6 Connaissance | `utils/rag_collections.py`, `utils/corpus_sanitizer.py`, `utils/explanations.py`, `utils/scan_stats.py`, `utils/takeover_fingerprints.py`, `data/script_*.py` | Collections `normes`, `attack`, `menaces`, `explications` (règle fichier → collection en 3 copies Python/n8n/SQL, testées identiques). Réindexation : redémarrer n8n, ou `data/sql/reindex_collections.sql` sous `rag_writer`. `comparative_context` : k-anonymat ≥ 10 domaines, jamais de nom de domaine, injecté comme **contexte, jamais comme preuve**. `subdomain_takeover` utilise can-i-take-over-xyz (suffixe DNS ; « Not vulnerable » ignoré, « Edge case » listé à part dans `edge_cases`) complété par `_CNAME_SUPPLEMENT` pour les services sans CNAME dans la source |
+| 7 Graphe | `models/entity_graph.py`, `models/scan_monitoring.py`, `utils/entity_graph.py`, `utils/scan_diff.py`, `routes/graph.py`, `web/dashboard-graph.{js,css}`, `n8n/workflows/recon-ia-rescan.json` | Tables `entity`, `relation`, `scan_snapshot`, `watched_domain`. Graphe et différentiel calculés **avant le scellement** dans `generate_report`, stockés **en clair** (données techniques publiques uniquement, décision D10). Surveillance opt-in (désactivée par défaut), alertes à l'admin seulement. Routes `/graph/*`, `/monitoring*`, `/recon/<id>/diff` : admin ; `/monitoring/due` et `/monitoring/<id>/ingest` : jeton de service |
+| 8 Agent | `utils/recon_agent.py`, `utils/agent_llm.py` | Étape finale de `/pass_recon`, **`AGENT_RECON_ENABLED=false` par défaut**. Refuse `qwen3:1.7b` (modèle ≥ 7B, Gemini ou DeepSeek requis — D9 ouverte). 7 outils passifs en liste blanche ; cible acceptée seulement si déjà observée dans le périmètre. Journal `scan_results["agent_pivots"]` → section Méthodologie du PDF, graphe (pivots rejoués) et `signals["agent_pivots"]` |
+
+Raccords entre phases : `tests/test_phase_integration.py`. Exports CSV : 4
+colonnes ajoutées (`observed_at`, `severity_rule`, `attack_enabled`,
+`mitigations`, ces deux dernières recalculées par la table de la phase 4).
 
 ### Un email peut lancer plusieurs scans distincts (2026-07-30 — remplace l'ancienne « relance différée »)
 
@@ -390,27 +564,42 @@ par le polling existant (30s), aucun mécanisme temps réel supplémentaire.
   `analyzing_ai` dès l'acceptation de `/analyze/async` (avant même le
   premier appel LLM) — conforme à l'implémentation.
 
-Blueprints (`routes/__init__.py`, **9 exactement**) et rate limits déclarés :
+Blueprints (`routes/__init__.py`, **11 exactement**), accès et rate limits
+déclarés. Accès : **public** = sans compte ; **admin** = Basic Auth
+(`require_auth`) ; **service|admin** = jeton de service de n8n OU admin
+(`require_service_or_auth`) ; **session** = jeton de session obtenu avec le
+code d'accès.
 
-| Route | Fichier | Limite |
-|---|---|---|
-| `GET /` (catalogue public) | `welcome.py` | — |
-| `POST /auth/login` | `auth.py` | 10/min |
-| `POST /recon` | `crud.py` | 20/h |
-| `POST /verify_email` | `crud.py` | 10/h |
-| `GET /recon`, `GET/PUT/DELETE /recon/<id>`, `PATCH /recon/<id>/result`, `GET /recon/<id>/report` | `crud.py` | — |
-| `GET /logs`, `GET /logs/stats` | `logs.py` | — |
-| `POST /pass_recon` | `recon.py` | — |
-| `POST /analyze`, `POST /analyze/async` | `analyze.py` | 5/h |
-| `GET /analyze/status` | `analyze.py` | — |
-| `GET\|POST /analyze/wait/<id>` | `analyze.py` | 60/min |
-| `POST /recon/<id>/generate_final_report` | `report.py` | 20/h |
-| `POST /recon/<id>/generate_report` | `report.py` | 10/h |
-| `GET /recon/<id>/report.pdf`, `GET /recon/<id>/export.json`, `GET /recon/<id>/export.csv` | `report.py` | — |
-| `POST /dns_info` | `dns_info.py` | — |
-| `GET /recon/stats` | `stats.py` | — |
+| Route | Fichier | Accès | Limite |
+|---|---|---|---|
+| `GET /` (catalogue public) | `welcome.py` | public | — |
+| `POST /auth/login` | `auth.py` | public | 10/min |
+| `POST /recon` | `crud.py` | public (+ Turnstile) | 20/h |
+| `POST /verify_email` | `crud.py` | public | 10/h |
+| `GET /recon`, `GET/PUT/DELETE /recon/<id>`, `PATCH /recon/<id>/result`, `GET /recon/<id>/report` | `crud.py` | admin | — |
+| `GET /logs`, `GET /logs/stats` | `logs.py` | admin | — |
+| `POST /pass_recon` | `recon.py` | service\|admin | 30/h |
+| `POST /analyze`, `POST /analyze/async` | `analyze.py` | service\|admin | 5/h |
+| `GET /analyze/status` | `analyze.py` | admin | — |
+| `GET\|POST /analyze/wait/<id>` | `analyze.py` | service\|admin | 60/min |
+| `POST /recon/<id>/generate_final_report` | `report.py` | service\|admin | 20/h |
+| `POST /recon/<id>/generate_report` | `report.py` | service\|admin | 10/h |
+| `GET /recon/<id>/report.pdf`, `export.json`, `export.csv` | `report.py` | admin (403 si scellé) | — |
+| `POST /recon/<id>/issue_access`, `POST /recon/<id>/revoke_access` | `report.py` | admin | 10/h (issue) |
+| `POST /results/access` | `results.py` | public (code) | 5/min, 30/h |
+| `GET /results/report` | `results.py` | session | 120/h |
+| `GET /results/report.pdf`, `export.json`, `export.csv` | `results.py` | session | 60/h |
+| `POST /dns_info` | `dns_info.py` | admin | — |
+| `GET /cache`, `GET /cache/<id>`, `GET /cache/<id>/export.json` | `cache.py` | admin | — |
+| `GET /recon/stats` | `stats.py` | admin | — |
 
-Limites globales par défaut (`extensions.py`) : `200/jour` + `60/heure` par IP.
+Limites globales par défaut (`extensions.py`) : `5000/jour` + `1000/heure`
+par IP. **Les requêtes porteuses du jeton de service valide sont exemptées
+de toutes les limites** (`@limiter.request_filter`) : elles viennent toutes
+de l'IP du conteneur n8n et épuisaient un plafond commun à tous les
+utilisateurs (point S6 du plan). Le débit du pipeline reste borné en amont
+par les limites de `POST /recon` et `POST /verify_email`. Le jeton de
+service n'ouvre **aucune** route admin (testé).
 
 ⚠️ **Les endpoints `/crawl`, `/sublist3r`, `/crtsh`, `/sslscan`, `/holehe`,
 `/netcraft_full_report` n'existent pas** (supprimés). Aucun fichier
@@ -419,10 +608,14 @@ un catalogue **incomplet** : il ne liste ni `/analyze*`, ni `/recon/<id>/generat
 ni `report.pdf`, ni les exports, ni `/recon/stats`. À corriger si on touche à
 ce fichier — mais ce n'est pas la source de vérité, `routes/__init__.py` l'est.
 
-### Pipeline OSINT — 47 outils, entièrement parallélisé
+### Pipeline OSINT — 56 outils (47 + 9 de la phase 5), entièrement parallélisé
 
 `routes/recon.py` :
-- `TOOLS_REGISTRY` et `ALL_TOOLS` contiennent **exactement 47 identifiants
+- `TOOLS_REGISTRY` contient **56 identifiants** depuis la phase 5 (47 historiques
+  + `dns_mass`, `blocklists`, `threats_check`, `web_metadata`, `site_ranking`,
+  `virustotal`, `dnsdumpster`, `grayhatwarfare`, `github_dorks` — voir
+  `docs/phases/PHASE_5.md`), plus l'entrée `agent_pivots` (phase 8) quand la
+  boucle agent tourne. Historique (47 outils) : `TOOLS_REGISTRY` et `ALL_TOOLS` contenaient **exactement 47 identifiants
   chacun, et les deux ensembles sont identiques** (compté par script, pas
   estimé). Répartis en 11 catégories : Domain Intelligence, Subdomain
   Discovery, DNS/Réseau, SSL/TLS, Email/Messagerie, Web/HTTP, Web/OSINT,
@@ -436,7 +629,17 @@ ce fichier — mais ce n'est pas la source de vérité, `routes/__init__.py` l'e
   - **union `all_subdomains`** faite par le thread principal (aucune course).
   - **vague 2 (38 outils)** — tout le reste ; `headers` et
     `subdomain_takeover` consomment `all_subs`, les autres ne dépendent que
-    du domaine.
+    du domaine. Ces deux outils ne prennent qu'un échantillon (10 et 50),
+    choisi par `_prioritize_subdomains()` : les sous-domaines aux libellés
+    sensibles d'abord (`_SENSITIVE_SUBDOMAIN_KEYWORDS` : admin, vpn, sso,
+    jenkins, staging, dev, api…, reconnus comme libellé entier ou segment
+    séparé par `-`, jamais comme sous-chaîne — `latest.` n'est pas `test`),
+    puis ordre alphabétique. Sélection **déterministe** : avant le
+    2026-10-19, `headers` prenait les 10 premiers par ordre alphabétique et
+    `subdomain_takeover` `list(set)[:50]`, dont l'ordre change d'un processus
+    à l'autre (deux scans identiques ne testaient pas les mêmes hôtes).
+    `headers` marque `status: "blocked"` un sous-domaine refusé par la garde
+    anti-SSRF.
   - 9 + 38 = 47.
 - Réglages : `SCAN_MAX_WORKERS` (défaut `DEFAULT_MAX_WORKERS = 8`) et
   `SCAN_DEADLINE_SECONDS` (défaut 180 s).
@@ -847,7 +1050,7 @@ monte ce template et fixe `NGINX_ENVSUBST_OUTPUT_DIR=/usr/share/nginx/html` ;
 `config.js` est régénéré à **chaque démarrage** du conteneur (pas seulement le
 premier). `dashboard.html` lit `window.RECON_IA_CONFIG.API_BASE`, avec repli
 sur l'URL de prod codée en dur si `config.js` est absent ou vide (chaîne vide
-→ falsy en JS). Valeur locale : `http://localhost:8080` (l'URL doit être
+→ falsy en JS). Valeur locale : `http://api.localhost` (via Caddy ; l'URL doit être
 joignable par le **navigateur**, jamais un nom de service Docker comme
 `http://api:8080` — piège symétrique à celui déjà documenté pour
 `DOMAIN_URL_API` côté n8n).
@@ -1015,6 +1218,14 @@ Rapport généré via DeepSeek (slot 0), remonté par l'utilisateur avec 3 défa
   planter tout code downstream itérant dessus. Vérifié en conditions réelles
   (nouvel appel DeepSeek sur `recon.id=9`) : `attack_surface` correctement
   peuplé (`total_subdomains: 25`, `technologies: ['Apache','Ghost','WordPress','jQuery']`).
+  ⚠️ **Mais `exposed_services` restait toujours vide — corrigé
+  (2026-10-19).** `build_attack_surface` lisait `signals["shodan_internetdb"]`
+  alors que `_extract_signals` range Shodan sous
+  `signals["network"]["shodan_internetdb"]` : aucun port n'était jamais
+  trouvé, sur aucun backend. Lecture corrigée (racine conservée en repli),
+  testée sur la vraie chaîne scan brut → `_extract_signals` →
+  `build_attack_surface` (`tests/test_attack_surface.py`, qui échoue sur
+  l'ancien code).
 - ⚠️ **"Durée totale" affichait "—" sur la couverture/cover du PDF malgré un
   `execution_time` correct en base (~1min37).** Cause : dans
   `routes/report.py::generate_report`, `timing = _compute_timing(recon,
@@ -1204,13 +1415,24 @@ envoyé) → `GET report.pdf` → `export.json`/`export.csv` (provenance et
 
 ### Workflows n8n (`n8n/workflows/`)
 
-- **`recon-ia-main.json`** — pipeline déclenché par le `Webhook` (path
-  `dfb160f6-…`, celui utilisé par `web/index.html`) : `verify_email` →
-  réponse immédiate au client (`Respond to Webhook`) + en parallèle
-  `pass_recon` → `analyze/async` → `analyze/wait` → `generate_final_report`
-  → `generate_report` (PDF + email, côté API). Toutes les URLs utilisent
-  `{{ $env.DOMAIN_URL_API }}` plutôt que d'être codées en dur par nœud.
-  Credential `httpBasicAuth` unique pour tous les appels API.
+- **`recon-ia-main.json`** (V3, 2026-10-19) — `Webhook` path
+  `recon-ia-pipeline`, appelé **uniquement par l'API** sur le réseau interne
+  (`http://n8n:5678/webhook/recon-ia-pipeline`, corps `{recon_id}`),
+  authentifié par la credential *Header Auth* `X-Pipeline-Secret`
+  (`N8N_WEBHOOK_SECRET`), réponse immédiate `202` (`responseMode:
+  onReceived`). Puis `pass_recon` → `analyze/async` → `analyze/wait` →
+  `generate_final_report` → `generate_report` (PDF + scellement + mail avec
+  code, côté API). Chaque nœud lit `recon_id` dans le corps du webhook
+  (`Number($('Webhook').first().json.body.recon_id)`) et appelle l'API à son
+  adresse interne fixe `http://api:8080` avec la credential *Header Auth*
+  `X-Service-Token` (`PIPELINE_SERVICE_TOKEN`). Plus d'étape
+  `verify_email`, plus de `Respond to Webhook`, plus aucun `$env` — d'où
+  `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`. L'ancien workflow (V2) recevait
+  l'OTP du navigateur via un webhook public et appelait l'API avec le
+  compte admin.
+  Credentials provisionnées : `reconiaApiServiceTokenAutoV1`,
+  `reconiaWebhookSecretAutoV1` (changer l'ID si la valeur change — voir §8,
+  `import:credentials` n'est pas idempotent).
 - **`rag-ingestion.json`** — `Local File Trigger` (dossier
   `/tmp/n8n-source-docs`, `usePolling: true`, `ignoreInitial: false`) →
   `Switch` (.md/.txt) → `Extract from File` → `Postgres PGVector Store`
@@ -1262,11 +1484,40 @@ docker exec api python3 -c \
 ### Tests
 
 ```bash
-docker exec -it api python3 -m pytest        # RECOMMANDÉ (voir avertissement)
+./scripts/run-tests.sh                       # RECOMMANDÉ : conteneur jetable, sans réseau, sans la stack
+./scripts/run-tests.sh -m security           # tests de sécurité seuls (SSRF, accès…)
+./scripts/run-tests.sh -m integration        # tests de bout en bout sur les routes Flask
+REBUILD=1 ./scripts/run-tests.sh             # après un changement de requirements.txt
+./scripts/e2e/run-result-page.sh             # page « Voir le résultat » dans Chrome headless (27 vérifications)
+# Sur la stack démarrée (./setup.sh) — voir l'en-tête de chaque script pour les prérequis
+ADMIN_AUTH='email:motdepasse' ./scripts/e2e/run-full-flow.sh   # parcours complet réel (15 vérifications, ~15 min avec Ollama)
+SITE=http://localhost API_PUBLIC=http://api.localhost ADMIN_EMAIL=… ADMIN_PASSWORD=…   node scripts/e2e/dashboard.mjs <dossier> <chrome>               # dashboard admin (15 vérifications)
+docker exec -it api python3 -m pytest        # alternative dans le conteneur api
 cd api && python3 -m pytest                  # pytest.ini : testpaths=tests, -v --tb=short
 python3 -m pytest tests/test_export_stats.py
 python3 -m pytest --cov=. --cov-report=term-missing
 ```
+
+`scripts/run-tests.sh` construit au besoin l'image `recon-ia-api-test`
+(`api/Dockerfile.test`, dépendances seules, code monté en volume) et lance
+pytest avec `--network none` : un test qui oublierait de simuler le réseau
+échoue au lieu de dépendre d'Internet. Marqueurs déclarés dans `pytest.ini` :
+`security` et `integration` (un test non marqué est un test unitaire). État
+au 2026-10-19 (après les phases 3 à 8) : **946 tests pytest verts, 11 ignorés**
+(305 `security`, 113 `integration`), et 27
+vérifications navigateur vertes (`scripts/e2e/run-result-page.sh` : API réelle
+avec un dossier scellé contenant du HTML piégé, Chrome headless piloté par le
+protocole DevTools, sans dépendance npm — Node ≥ 22). Ce test a trouvé des
+défauts invisibles à pytest : le relancer après toute modification de
+`web/result.*`.
+Deux tests navigateur supplémentaires tournent sur la **stack réelle** :
+`scripts/e2e/run-full-flow.sh` (`full_flow.mjs` : formulaire + Turnstile → OTP
+lu dans Mailpit → pipeline n8n → mail avec code → `result.html` → PDF ;
+démarre Mailpit sur le réseau de la stack, nécessite `SMTP_SERVER=mailpit` /
+`SMTP_PORT=1025` dans `api/.env` et les clés de test Turnstile) et
+`scripts/e2e/dashboard.mjs` (connexion admin, cadenas, coffre, scan brut,
+onglet cache, aucune durée négative). Ils ont révélé 6 défauts au premier
+déploiement réel (voir §8).
 
 `config.py` détecte pytest (`sys.modules`, `PYTEST_CURRENT_TEST`, `TESTING`) et
 passe alors `load_dotenv(override=False)` : les valeurs posées par
@@ -1300,11 +1551,19 @@ Modifier `n8n/workflows/*.json` à la main = édition directe du JSON exporté
 (pas d'UI) : redémarrer le conteneur `n8n` pour que `provision-and-start.sh`
 réimporte automatiquement la version modifiée.
 
-### TLS / certificats (à réparer avant usage — voir §8)
+### TLS / certificats (Caddy, automatique)
+
+Dans le `.env` racine : `SITE_ADDRESS=recon.mondomaine.tld`,
+`API_ADDRESS=api.mondomaine.tld`, `ACME_EMAIL=...`, `DASHBOARD_API_BASE=https://api.mondomaine.tld`,
+`RESULTS_PAGE_URL=https://recon.mondomaine.tld/result.html`, et
+`CORS_ORIGINS=https://recon.mondomaine.tld` dans `api/.env`. Les deux noms
+doivent pointer vers le serveur (ports 80/443 ouverts) : Caddy obtient et
+renouvelle les certificats seul.
 
 ```bash
-./scripts/init-letsencrypt.sh   # émission initiale (domaine et email codés en dur)
-./scripts/renew-certs.sh        # copie les certs vers n8n_certs/ + restart n8n
+docker compose up -d caddy           # (re)charge caddy/Caddyfile
+docker compose logs -f caddy         # émission / renouvellement des certificats
+ssh -L 5678:127.0.0.1:5678 serveur   # éditeur n8n, puis http://localhost:5678
 ```
 
 ---
@@ -1315,28 +1574,35 @@ réimporte automatiquement la version modifiée.
 
 | Fichier | Rôle | Atteint les conteneurs ? |
 |---|---|---|
-| `api/.env` | source de vérité runtime. `env_file:` des services **`api` et `postgres`**, et relu en Python par `config.py`/`migrate.py` | **oui** |
-| `.env` (racine) | **uniquement** l'interpolation `${VAR}` du texte de `docker-compose.yml` | **non** — Compose ne le transmet pas |
+| `api/.env` | réglages propres à l'API. `env_file:` des services **`api` et `postgres`**, et relu en Python par `config.py`/`migrate.py` | **oui** |
+| `.env` (racine) | interpolation `${VAR}` de `docker-compose.yml` **et** seule source des secrets partagés API ↔ n8n, que le compose injecte explicitement dans chaque service | **oui, via `environment:`** |
 
-Le `.env` racine doit contenir `POSTGRES_USER`, `POSTGRES_PASSWORD`,
-`POSTGRES_DB`, `DOMAIN_URL_API`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_PLAIN` — sinon
-Compose substitue une chaîne vide et émet « variable is not set ». Impacts
-réels : `DOMAIN_URL_API` vide casse silencieusement `{{ $env.DOMAIN_URL_API }}`
-dans le workflow n8n principal, et `ADMIN_EMAIL`/`ADMIN_PASSWORD_PLAIN` vides
-font que **la credential `httpBasicAuth` du workflow principal n'est jamais
-provisionnée** (`n8n/generate-credentials.js` la saute) → tous les appels API du
-workflow échouent. Ces valeurs doivent être **renseignées dans les deux
-fichiers** et gardées synchronisées à la main.
+**Secrets partagés (2026-10-19) — uniquement dans le `.env` racine**, générés
+par `setup.sh` (`ensure_root_var` les ajoute aussi à une installation
+existante) : `PIPELINE_SERVICE_TOKEN` (API + n8n), `N8N_WEBHOOK_SECRET`
+(API + n8n), `RESULTS_ACCESS_SECRET` (API), `N8N_ENCRYPTION_KEY` (n8n),
+`APP_DB_PASSWORD` (API) et `RAG_DB_PASSWORD` (API pour `migrate.py` + n8n). Ne
+jamais les recopier dans `api/.env` : `config.py` (`load_dotenv(override=True)`)
+donnerait priorité à cette seconde copie, qui finirait par diverger de celle
+que reçoit n8n. `ADMIN_PASSWORD_PLAIN` et `DOMAIN_URL_API` ne servent plus
+(n8n a son jeton et appelle `http://api:8080`) ; `setup.sh` le signale s'ils
+traînent encore.
 
-Le service **`n8n` n'a plus `env_file: ./api/.env`** : seules les variables
-réellement utilisées lui sont injectées explicitement (`DOMAIN_URL_API`,
-`ADMIN_EMAIL`, `ADMIN_PASSWORD_PLAIN`, `POSTGRES_*`, `NODES_EXCLUDE`, …).
-Le `.env` complet lui exposait auparavant `SMTP_PASSWORD` et toutes les clés IA
-via `$env` depuis n'importe quel Code node.
+Le `.env` racine doit aussi contenir `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`POSTGRES_DB` (healthcheck et credential Postgres du workflow RAG) — sinon
+Compose substitue une chaîne vide et émet « variable is not set ».
+
+Le service **`n8n` n'a pas `env_file: ./api/.env`** : seules les variables
+réellement utilisées lui sont injectées (`PIPELINE_SERVICE_TOKEN`,
+`N8N_WEBHOOK_SECRET`, `N8N_ENCRYPTION_KEY`, `POSTGRES_*`, `NODES_EXCLUDE`, …),
+et `N8N_BLOCK_ENV_ACCESS_IN_NODE=true` empêche tout Code node de les lire.
 
 **Obligatoires** (l'API refuse de démarrer sinon — `config.py` lève `ValueError`) :
 `ADMIN_EMAIL`, `ADMIN_PASSWORD` (hash werkzeug), et `POSTGRES_USER` + `POSTGRES_DB`
-si `DATABASE_URL` n'est pas fourni.
+si `DATABASE_URL` n'est pas fourni. **Requis en pratique** pour le flux
+utilisateur : `RESULTS_ACCESS_SECRET` (sans lui, aucun code d'accès n'est
+émis), `PIPELINE_SERVICE_TOKEN` + `N8N_WEBHOOK_SECRET` (sans eux, la
+vérification de l'email ne lance rien), SMTP.
 
 ⚠️ **`ADMIN_PASSWORD` (et toute valeur contenant un `$` littéral, ex. hash
 werkzeug `pbkdf2:sha256:…$xxx$yyy` / `scrypt:…$xxx$yyy`) : NE JAMAIS doubler
@@ -1357,11 +1623,15 @@ silencieusement** (`printenv` ne le révèle pas). **Garder les `$` non doublés
 
 | Groupe | Variables |
 |---|---|
-| DB | `DATABASE_URL` (prioritaire), `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` |
+| DB | `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` (compte propriétaire : migrations) ; `APP_DB_PASSWORD` (.env racine, rôle d'exécution `recon_app`, prioritaire à l'exécution), `RAG_DB_PASSWORD` (.env racine, rôle `rag_writer` de n8n) |
 | Rate limiting | `REDIS_URL` (déf. `redis://redis:6379/0`) — stockage partagé Flask-Limiter ; absent ⇒ repli `memory://` avec avertissement au démarrage |
-| Serveur | `GUNICORN_WORKERS` (2), `GUNICORN_THREADS` (4), `GUNICORN_TIMEOUT` (300), `TRUSTED_PROXY_COUNT` (1 — nombre EXACT de proxys de confiance ; le surévaluer permet d'usurper une IP via `X-Forwarded-For`) |
-| Admin / Flask | `ADMIN_EMAIL`, `ADMIN_PASSWORD` (hash, `$` **non** doublés), `ADMIN_PASSWORD_PLAIN` (clair, **uniquement** pour provisionner la credential n8n `httpBasicAuth` — aussi requis dans le `.env` racine), `SECRET_KEY` (≥32 car.), `CORS_ORIGINS`, `FLASK_ENV`, `FLASK_DEBUG`, `FLASK_HOST`, `FLASK_PORT`, `LOG_LEVEL` |
-| SMTP | `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `EMAIL_FROM`, `ADMIN_NOTIFICATION_EMAIL`, `DOMAIN_URL_API`, `OTP_TTL_SECONDS` (600) |
+| Serveur | `GUNICORN_WORKERS` (2), `GUNICORN_THREADS` (4), `GUNICORN_TIMEOUT` (300), `TRUSTED_PROXY_COUNT` (forcé à 1 par le compose : Caddy — nombre EXACT de proxys de confiance ; le surévaluer permet d'usurper une IP via `X-Forwarded-For`) |
+| Admin / Flask | `ADMIN_EMAIL`, `ADMIN_PASSWORD` (hash, `$` **non** doublés), `SECRET_KEY` (≥32 car.), `CORS_ORIGINS` (en production : l'origine exacte de `SITE_ADDRESS`), `FLASK_ENV`, `FLASK_DEBUG`, `FLASK_HOST`, `FLASK_PORT`, `LOG_LEVEL` |
+| SMTP / OTP | `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `EMAIL_FROM`, `ADMIN_NOTIFICATION_EMAIL`, `OTP_TTL_SECONDS` (600), `OTP_MAX_ATTEMPTS` (5) |
+| Flux & sécurité (`.env` racine) | `PIPELINE_SERVICE_TOKEN`, `N8N_WEBHOOK_SECRET`, `N8N_PIPELINE_WEBHOOK_URL` (déf. `http://n8n:5678/webhook/recon-ia-pipeline`), `N8N_ENCRYPTION_KEY`, `TURNSTILE_SITE_KEY` (publique, page web), `TURNSTILE_SECRET_KEY` (API ; vide = captcha désactivé, dev uniquement) |
+| Coffre des résultats | `RESULTS_ACCESS_SECRET` (`.env` racine, ≥32 car., stable), `RESULTS_PAGE_URL` (`.env` racine, lien du mail), `RESULTS_ACCESS_TTL_DAYS` (30), `RESULTS_SESSION_TTL_SECONDS` (3600) |
+| Conservation (purge RGPD) | `RETENTION_INTERVAL_S` (3600), `RESULTS_PURGE_GRACE_DAYS` (7), `UNVERIFIED_RETENTION_DAYS` (7), `AUDIT_RETENTION_DAYS` (90) |
+| Proxy et images (`.env` racine) | `SITE_ADDRESS` (déf. `http://localhost`), `API_ADDRESS` (déf. `http://api.localhost`), `ACME_EMAIL`, `CADDY_HTTP_PORT` (80), `CADDY_HTTPS_PORT` (443), `N8N_IMAGE` (déf. `docker.n8n.io/n8nio/n8n` ; `n8nio/n8n` si le registre officiel répond 429) |
 | Scan OSINT | `SCAN_MAX_WORKERS` (8), `SCAN_DEADLINE_SECONDS` (180) |
 | IA — DeepSeek | `DEEPSEEK_API_KEY` (payant, vide par défaut — slot 0, test uniquement), `DEEPSEEK_MODEL` (déf. `deepseek-chat`), `DEEPSEEK_MAX_TOOL_RESULT_CHARS`, `DEEPSEEK_MAX_TOOL_CALLS_PER_ROUND`, `DEEPSEEK_TPM_SLEEP` |
 | IA — Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_MAX_TOOL_CALLS_PER_ROUND`, `GEMINI_MAX_TOOL_RESULT_CHARS`, `GEMINI_TPM_SLEEP` |
@@ -1371,7 +1641,7 @@ silencieusement** (`printenv` ne le révèle pas). **Garder les `$` non doublés
 | IA — Ollama | `OLLAMA_URL` (déf. `http://ollama:11434`), `OLLAMA_MODEL` (déf. **`qwen3:1.7b`** — **jamais** `ANALYSIS_MODEL`, qui est un nom de modèle Groq ; voir §5 « Cascade IA » pour pourquoi `phi3:mini` a été écarté), `OLLAMA_CHAT_TIMEOUT` (déf. 360), `OLLAMA_MAP_ROUNDS`, `OLLAMA_MAX_SECTION_TOKENS` (entrée), `OLLAMA_MAP_OUTPUT_TOKENS` (déf. 700, sortie section MAP), `OLLAMA_REDUCE_OUTPUT_TOKENS` (déf. 1400, sortie synthèse REDUCE) |
 | Analyse (commun) | `ANALYSIS_LANG` (`fr`), `ANALYSIS_MAX_SEARCH_ROUNDS` (6), `ANALYSIS_BACKEND_TIMEOUT` (480), `ANALYSIS_CACHE_TTL_HOURS` (168), `FINAL_REPORT_MAX_SCAN_CHARS`, `FINAL_REPORT_MAX_ANALYSIS_CHARS` |
 | RAG (retrieval, `utils/rag_retrieval.py`) | `RAG_TOP_K` (déf. 6, nombre d'extraits injectés dans le prompt d'analyse), `RAG_EMBED_TIMEOUT` (déf. 30s) |
-| Dashboard (`.env` racine uniquement, PAS `api/.env`) | `DASHBOARD_API_BASE` — URL API que le **navigateur** utilise depuis `web/dashboard.html` (injectée dans `web/config.js` au démarrage du conteneur `web`, voir §5) ; jamais un nom de service Docker |
+| Pages web (`.env` racine) | `DASHBOARD_API_BASE` — URL API que le **navigateur** utilise depuis `index.html`, `result.html` et `dashboard.html` (injectée dans `web/config.js` au démarrage du conteneur `web`) ; jamais un nom de service Docker |
 | OSINT (toutes optionnelles) | `GITHUB_TOKEN`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, `ABUSECH_AUTH_KEY`, `URLSCAN_API_KEY`, `TAVILY_API_KEY` |
 
 `.env` (donc `api/.env` **et** le `.env` racine) est couvert par `.gitignore`
@@ -1463,13 +1733,13 @@ demande explicite.
   `OPENROUTER_FALLBACK_MODELS`, `OPENROUTER_MAX_ROUNDS`,
   `OPENROUTER_RATE_LIMIT_SLEEP`, `TAVILY_API_KEY`. L'ancien constat (25 vs 44
   variables) ne reflète plus l'état du fichier — ne pas s'y fier.
-  **Reste réellement manquant** (vérifié) : `SCAN_MAX_WORKERS`,
-  `SCAN_DEADLINE_SECONDS`, `TRUSTED_PROXY_COUNT`, `GUNICORN_WORKERS`,
-  `GUNICORN_THREADS`, `GUNICORN_TIMEOUT`, `OTP_TTL_SECONDS`, `RAG_TOP_K`,
+  ✅ **Complété le 2026-10-19** avec les 11 variables qui manquaient encore
+  (`SCAN_MAX_WORKERS`, `SCAN_DEADLINE_SECONDS`, `TRUSTED_PROXY_COUNT`,
+  `GUNICORN_WORKERS`/`_THREADS`/`_TIMEOUT`, `OTP_TTL_SECONDS`, `RAG_TOP_K`,
   `RAG_EMBED_TIMEOUT`, `OPENROUTER_MAX_429_BEFORE_SWITCH`,
-  `OPENROUTER_MAX_TOOL_RESULT_CHARS`, ainsi que `DASHBOARD_API_BASE` et
-  `WEBHOOK_BASE_URL` (normal : ces deux dernières appartiennent au `.env`
-  **racine**, pas à `api/.env.example`).
+  `OPENROUTER_MAX_TOOL_RESULT_CHARS`), valeurs par défaut identiques au
+  code. `DASHBOARD_API_BASE` reste absente, à juste titre : elle appartient
+  au `.env` **racine** (`WEBHOOK_BASE_URL` a disparu avec la phase 1).
 - ✅ **La référence morte `HIBP_API_KEY` dans `config.py` a été retirée**
   (vérifié 2026-08-29 : absente de `config.py`, ne subsiste plus qu'en note
   explicative dans `api/.env.example` ligne 147 expliquant pourquoi HIBP a
@@ -1491,28 +1761,54 @@ demande explicite.
   pre-commit) ; `pytest.ini` est le seul fichier de configuration outillage.
 
 ### Infra / sécurité
-- `scripts/init-letsencrypt.sh` et `scripts/renew-certs.sh` référencent des
-  services `nginx` et `certbot` **absents de `docker-compose.yml`**, et codent
-  en dur `n8n.idachallenge.bj` + une adresse email personnelle. `nginx/conf.d/`
-  et `nginx/ssl/` sont vides. **Le TLS n'est donc pas assuré par ce compose** :
-  il suppose un reverse proxy externe.
-- ⚠️ **L'UI n8n (port 5678, publié) n'a AUCUNE authentification** :
-  `N8N_BASIC_AUTH_*` n'est jamais défini. Combiné à
-  `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (nécessaire pour
-  `{{ $env.DOMAIN_URL_API }}`), n'importe qui atteignant ce port peut créer un
-  Code node et lire `ADMIN_PASSWORD_PLAIN` et `POSTGRES_PASSWORD` en clair.
-  **Ne jamais exposer 5678 publiquement sans authentification devant.**
+
+✅ **Résolus le 2026-10-19 (plan d'action, phase 1)** — conservés ici pour
+l'historique :
+- ~~TLS non assuré (scripts nginx/certbot visant des services absents)~~ →
+  Caddy, seul service publié, TLS automatique ; scripts et dossiers morts
+  supprimés.
+- ~~UI n8n publiée sur 5678 sans authentification, `$env` ouvert,
+  `ADMIN_PASSWORD_PLAIN` lisible depuis un Code node~~ → n8n publié sur
+  `127.0.0.1` seulement, `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`, plus aucun mot
+  de passe admin confié à n8n (jeton de service à droits limités),
+  `N8N_ENCRYPTION_KEY` fixe. **Reste à faire à chaque déploiement neuf :
+  créer le compte propriétaire n8n immédiatement.**
+- ~~Webhook n8n public appelé par le navigateur~~ → appelé seulement par
+  l'API sur le réseau interne, protégé par `X-Pipeline-Secret`.
+- ~~Limites de débit du pipeline partagées par tous les utilisateurs (IP du
+  conteneur n8n)~~ → appels porteurs du jeton de service exemptés.
+- ~~`OLLAMA_HOST` sur le port 11435, fautes de frappe
+  `N8N_EXPRESS_TRUCT_PROXY` / doublons `N8N_RUNNERS_ENABLED`,
+  `extra_hosts: host.docker.internal` inutile sur n8n~~ → nettoyés.
+- ~~Brute-force OTP réparti sur plusieurs IP~~ → 5 essais par dossier.
+
+Toujours d'actualité :
+- ✅ **Rôles PostgreSQL à droits minimaux (2026-10-19, vérifiés sur la vraie
+  base).** `api/migrate.py::ensure_roles()` (après les migrations, compte
+  propriétaire) crée ou resynchronise à chaque démarrage :
+  - `recon_app` (`APP_DB_PASSWORD`) — rôle d'exécution de l'API
+    (`config.py` le préfère à `DATABASE_URL`) : DML sur `recon`, `audit_log`,
+    `pass_recon_cache`, lecture seule de `rag_documents`, aucun DDL.
+    Vérifié : `CREATE TABLE` → *permission denied for schema public*,
+    écriture dans `rag_documents` refusée, l'API tourne bien avec ce rôle
+    (`pg_stat_activity`).
+  - `rag_writer` (`RAG_DB_PASSWORD`) — credential Postgres du workflow RAG
+    de n8n (`reconiaPostgresRagWriterV2`) : `rag_documents` uniquement
+    (+ USAGE/CREATE sur le schéma). Vérifié : lecture de `recon`,
+    `audit_log`, `pass_recon_cache` refusée ; `CREATE EXTENSION IF NOT
+    EXISTS vector` et `CREATE TABLE IF NOT EXISTS rag_documents` passent
+    (ce que le nœud PGVector exécute) ; INSERT/TRUNCATE passent. Le droit
+    CREATE sur le schéma est **indispensable** : sans lui, `CREATE TABLE IF
+    NOT EXISTS` est refusé même quand la table existe (testé). n8n ne reçoit
+    plus du tout le mot de passe propriétaire (`POSTGRES_PASSWORD` retiré de
+    son environnement).
+  Sans ces mots de passe (`.env` racine, générés par `setup.sh`), tout
+  retombe sur le compte propriétaire comme avant.
 - **Ne jamais monter `/var/run/docker.sock` dans le conteneur n8n** (le
   compose le documente explicitement) : cela donne un contrôle root sur l'hôte.
-- `.gitignore` couvre désormais `n8n_certs/`, `certbot/conf/`, `n8n_data/`,
-  `ollama/`, `postgres_data/`, `n8n-backup.tar.gz`, `web/*.pdf` et `.env`.
+- `.gitignore` couvre `caddy_data/`, `caddy_config/`, `n8n_data/`, `ollama/`,
+  `postgres_data/`, `n8n-backup.tar.gz`, `web/*.pdf`, `web/config.js` et `.env`.
   Vérifier malgré tout avant tout `git add -A`.
-- Le service n8n reçoit `OLLAMA_HOST=${OLLAMA_HOST:-ollama:11435}` : **11435
-  est le mauvais port** en réseau interne (Ollama écoute 11434, et n'expose
-  plus rien sur l'hôte). La credential Ollama provisionnée par
-  `generate-credentials.js` utilise, elle, la bonne URL `http://ollama:11434`.
-- Fautes de frappe dans les variables n8n : `N8N_EXPRESS_TRUCT_PROXY`
-  (sic, sans effet), doublons `N8N_RUNNERS_ENABLED`.
 - `web/dashboard.html` transmet les identifiants admin en Basic Auth depuis le
   navigateur vers `api.idachallenge.bj` — pas de session, pas de token.
 - `is_safe_domain` (anti-SSRF) résout le domaine et refuse toute IP interne,
@@ -1591,6 +1887,85 @@ de cet audit) :
   `hmac.compare_digest`, logs sans identifiants/OTP ; `web/dashboard.html`
   échappe systématiquement (`escHtml`) tout champ contrôlé par un outil/LLM,
   y compris le `raw_output` brut — pas de XSS stocké trouvé.
+- ⚠️ **(High) SSRF par sous-domaine ou redirection — corrigé
+  (2026-10-19).** Constat de l'audit du plan d'action : seul le domaine
+  saisi passait par `is_safe_domain`. Un attaquant scannant son propre
+  domaine pouvait publier un sous-domaine résolvant vers `169.254.169.254`
+  ou une IP du réseau Docker (`_http_headers_tool` l'interrogeait en `HEAD`
+  et recopiait les en-têtes dans le rapport), ou faire répondre son domaine
+  par une redirection vers une adresse interne (suivie par les 5 appels
+  `allow_redirects=True`). Corrigé à la source par la garde
+  `_SsrfGuardedSession` (voir §4). Couvert par
+  `tests/test_security_ssrf.py` (20 tests : IP littérales sensibles, noms
+  Docker internes, nom public → IP interne, redirections, intégration
+  `POST /pass_recon` avec sous-domaine piégé).
+
+### Premier déploiement réel après les phases 0–2 (2026-10-19) — 3 blocages corrigés
+
+Stack complète démarrée par `setup.sh` sur un poste Windows (Docker
+Desktop), pour valider ce que les tests ne couvraient pas. Trois défauts ont
+empêché le démarrage, tous corrigés à la source :
+
+- ⚠️ **Registre `docker.n8n.io` → HTTP 429** (limite de débit) : le build de
+  l'image n8n échouait. `n8n/Dockerfile` prend maintenant l'image de base en
+  argument (`N8N_IMAGE`, défaut `docker.n8n.io/n8nio/n8n`) ;
+  `N8N_IMAGE=n8nio/n8n` (Docker Hub, même image) dans le `.env` racine
+  contourne le problème.
+- ⚠️ **L'API ne démarrait pas sous Windows : `entrypoint.sh` en CRLF**
+  (« set: Illegal option - »). Avec `core.autocrlf=true`, le checkout
+  convertit les fins de ligne, et `api/` est monté tel quel dans le conteneur
+  Linux. Nouveau **`.gitattributes`** : LF imposé pour `*.sh`, `*.py`, `*.js`,
+  `*.mjs`, `*.json`, `*.yml`, `Dockerfile*`, `Caddyfile`, `*.template`. Le
+  dépôt stockait déjà du LF : la conversion de la copie de travail ne crée
+  aucun diff de contenu.
+- ⚠️ **SQLAlchemy 2.1 installé au rebuild → « No module named 'psycopg' »**.
+  `requirements.txt` n'a pas de borne haute ; SQLAlchemy 2.1 a changé le
+  pilote par défaut de `postgresql://` (psycopg2 → psycopg 3), absent de
+  l'image. Nouveau `api/db_url.py::with_psycopg2()` appliqué par `config.py`
+  et `migrate.py` : pilote `postgresql+psycopg2://` forcé quelle que soit
+  l'origine de l'URL. Testé (`tests/test_validators.py::TestDbUrl`).
+  ⚠️ Rappel : sans lockfile, tout rebuild peut encore apporter une version
+  incompatible (point déjà signalé plus bas).
+- ⚠️ **Sans clé cloud, l'analyse IA était refusée (503) au lieu de passer à
+  Ollama** — bug antérieur au plan, révélé par le premier parcours réel :
+  `/analyze` et `/analyze/async` exigeaient au moins une clé cloud, alors que
+  `setup.sh` et le README promettent le repli local. Le pipeline n8n
+  s'arrêtait juste après le scan. Nouveau `routes/analyze.py
+  ::_any_backend_available()` : une clé cloud OU Ollama joignable avec son
+  modèle. Testé (`tests/test_pipeline_flow.py
+  ::TestAnalysisBackendAvailability`) et vérifié en réel (`202`, Map-Reduce
+  Ollama lancé).
+
+Vérifié ensuite sur cette stack réelle : ports exposés depuis l'IP du poste
+(seuls 8088/8444 de Caddy répondent ; 8080, 5678, 5432, 6379, 11434
+fermés) ; provisioning n8n (4 credentials, workflow V3 actif, webhook qui
+refuse toute requête sans `X-Pipeline-Secret` valide → 403) ; en-têtes
+anti-iframe posés par Caddy ; SMTP réel avec STARTTLS + authentification
+(Mailpit) ; widget Turnstile réel avec les clés de test Cloudflare ; rôles
+PostgreSQL (voir « Infra / sécurité »). Parcours complet : voir
+`scripts/e2e/full_flow.mjs` (§6).
+
+### Stack réelle après les phases 3 à 8 (2026-10-19) — 3 défauts corrigés
+
+Parcours complet 15/15 et dashboard 15/15 sur la stack reconstruite, puis
+relecture des données produites. Trois défauts invisibles aux tests
+unitaires, corrigés et couverts par `tests/test_phase_integration.py` :
+
+- **Graphe rempli par les seuls sous-domaines** : example.com remonte ~5 000
+  noms énumérés, qui épuisaient le plafond `MAX_ENTITIES_PER_SCAN` avant les
+  IP, ASN et ports. Plafond séparé `MAX_ENUMERATED_SUBDOMAINS = 3000`.
+- **`ssl_info` en échec « Network is unreachable »** : si la résolution A
+  échouait ponctuellement, l'outil se connectait à la première IPv6
+  (injoignable depuis Docker) et abandonnait. Il essaie désormais chaque
+  adresse, IPv4 d'abord ; une erreur TLS n'est pas réessayée.
+- **RAG toujours vide en local** : le modèle d'embeddings
+  `nomic-embed-text:v1.5` n'était jamais téléchargé (`/api/embeddings` en
+  404). `setup.sh` le télécharge maintenant à l'étape 5.
+
+Constat à garder en tête : sans clé cloud (`GEMINI_API_KEY`, `GROQ_API_KEY`…
+vides), toute l'analyse tombe sur `qwen3:1.7b` en CPU (~7 tokens/s, ~19 min de
+pipeline, synthèse REDUCE qui dépasse `OLLAMA_REDUCE_TIMEOUT_S`). La qualité
+mesurée en phase 3 suppose un backend cloud.
 
 ### Incidents réels constatés et corrigés (2026-07-28)
 
@@ -1865,10 +2240,14 @@ Constaté en conditions réelles :
 
 ### RAG / n8n — provisioning automatique (validé en local, un point ouvert)
 - Pipeline complet (pgvector + workflows versionnés + provisioning auto)
-  **testé de bout en bout en local** : build, migrations, import des
-  credentials (postgres + ollamaApi automatiques ; `httpBasicAuth` seulement si
-  `ADMIN_EMAIL` **et** `ADMIN_PASSWORD_PLAIN` sont renseignés), import +
-  activation des deux workflows, webhook du pipeline principal accessible.
+  **testé de bout en bout en local** (2026-07-28, avant la phase 1) : build,
+  migrations, import des credentials, import + activation des deux
+  workflows. Depuis le 2026-10-19, les credentials du pipeline sont deux
+  *Header Auth* (`X-Service-Token`, `X-Pipeline-Secret`), provisionnées
+  seulement si `PIPELINE_SERVICE_TOKEN` / `N8N_WEBHOOK_SECRET` font ≥ 32
+  caractères — ⚠️ ce nouveau provisioning est validé par script
+  (`generate-credentials.js` exécuté hors conteneur) mais **pas encore
+  rejoué sur une stack démarrée**.
 - **Image `n8n/Dockerfile`** : l'image officielle `docker.n8n.io/n8nio/n8n`
   n'embarque **plus aucun gestionnaire de paquets** (image durcie). L'ancien
   `apt-get install bash whois` ne fonctionnait déjà pas et a été retiré —
@@ -1886,22 +2265,17 @@ Constaté en conditions réelles :
   si une valeur de credential change, **changer aussi son ID** (ex.
   `reconiaApiBasicAuthAuto` → `...AutoV2`) pour forcer une insertion neuve.
   Seuls les WORKFLOWS (`import:workflow`) sont réellement idempotents par ID.
-- ⚠️ **`DOMAIN_URL_API` doit pointer vers le réseau interne Docker, jamais
-  `localhost` ni le domaine de production, si on veut que le workflow n8n
-  appelle l'API locale.** Piège vécu : `DOMAIN_URL_API=https://localhost:8080`
-  dans le `.env` racine échoue silencieusement (« localhost » depuis le
-  conteneur `n8n` désigne n8n lui-même, pas le conteneur `api`) — le
-  symptôme observé était un simple 401 (bien plus trompeur qu'une erreur
-  réseau, car facilement confondu avec un mauvais mot de passe). Valeur
-  correcte pour du test local : `DOMAIN_URL_API=http://api:8080` (nom de
-  service Compose). Remettre `https://api.idachallenge.bj` pour cibler la
-  vraie production. Cette variable vient du `.env` **racine**, jamais
-  d'`api/.env` (n8n n'a plus accès à ce fichier, voir plus bas).
+- *(Historique, obsolète depuis le 2026-10-19)* `DOMAIN_URL_API` devait
+  pointer vers le réseau interne Docker (`http://api:8080`) : `localhost`
+  depuis le conteneur n8n désignait n8n lui-même (symptôme trompeur : un
+  simple 401). Les workflows utilisent désormais directement
+  `http://api:8080`, la variable n'existe plus.
 - **`NODES_EXCLUDE=[]` est requis** : le nœud *Local File Trigger* est
   désactivé par défaut depuis n8n 2.0 ; sans cette variable, l'activation du
   workflow RAG échoue en boucle (`Unrecognized node type`).
-- **`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` est requis** pour que
-  `{{ $env.DOMAIN_URL_API }}` fonctionne dans les nœuds HTTP Request.
+- `N8N_BLOCK_ENV_ACCESS_IN_NODE` vaut désormais **`true`** : plus aucun
+  workflow n'utilise `$env` (vérifié par grep sur `n8n/workflows/*.json`).
+  Ne pas réintroduire `$env` dans un nœud — passer par une credential.
 - ✅ **CORRIGÉ (2026-07-28) — `Local File Trigger` remplacé, ingestion
   désormais automatique.** Confirmé cassé sur ce poste : sur Docker Desktop
   macOS (bind mount), ce nœud s'activait sans erreur mais ne déclenchait
@@ -2061,9 +2435,8 @@ cumulatives ont été identifiées et corrigées :
 
 ### Artefacts résiduels
 - `n8n-backup.tar.gz` (87 octets — archive vide/tronquée).
-- `renew-certs.sh/` à la racine : dossier vide homonyme du vrai script.
-- `nginx/conf.d/` et `nginx/ssl/` : dossiers vides.
-- Règle `qdrant_data/` dans `.gitignore` alors que le dossier n'existe plus.
+- `renew-certs.sh/`, `nginx/`, `certbot/` et la règle `qdrant_data/` du
+  `.gitignore` : supprimés le 2026-10-19.
 
 ---
 
@@ -2134,8 +2507,18 @@ cumulatives ont été identifiées et corrigées :
 6. Toucher à l'analyse IA = lire d'abord la cascade de `routes/analyze.py`
    avant `utils/*_client.py`. Le champ `source_tool` est obligatoire sur chaque
    finding — ne pas relâcher cette contrainte, exports et PDF en dépendent.
-7. Ne rien committer sans vérifier que `n8n_certs/`, `certbot/conf/`,
-   `n8n_data/`, `postgres_data/` et les deux `.env` restent hors du diff.
+7. Ne rien committer sans vérifier que `caddy_data/`, `n8n_data/`,
+   `postgres_data/` et les deux `.env` restent hors du diff.
+11. Lire un résultat d'un dossier scellé = **jamais** en réécrivant les
+    colonnes du modèle (`recon.scan_results = ...`) : un commit ultérieur
+    remettrait le clair en base. Déchiffrer en mémoire
+    (`result_vault.unlock`) et passer les valeurs aux builders
+    (`build_export_json(recon, raw)`).
+12. Toute nouvelle route appelée par n8n = `@require_service_or_auth` (jamais
+    `@require_auth` seul, n8n n'a plus le compte admin) ; toute route
+    d'administration = `@require_auth` seul (le jeton de service ne doit pas
+    l'ouvrir).
+13. Lancer les tests : `./scripts/run-tests.sh` (voir §6).
 8. Modifier un workflow n8n = éditer `n8n/workflows/*.json` (source de vérité
    versionnée), **pas** l'éditeur n8n en prod — la modification serait perdue
    au prochain redémarrage du conteneur.

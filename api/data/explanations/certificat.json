@@ -1,0 +1,20 @@
+{
+  "id": "certificat",
+  "titre": "Certificat TLS — validité, expiration et noms couverts",
+  "categorie": "TLS",
+  "outils": ["ssl_info", "crtsh"],
+  "pourquoi": "Le certificat prouve au visiteur qu'il parle bien au serveur du domaine. Il est émis par une autorité de certification, pour une liste de noms (SAN) et une durée limitée. Les journaux publics Certificate Transparency (consultés via crt.sh) recensent tous les certificats émis, ce qui révèle aussi les sous-domaines de l'organisation.",
+  "risque": "Un certificat expiré, auto-signé ou ne couvrant pas le nom visité provoque des alertes que les utilisateurs apprennent à ignorer, ce qui facilite ensuite les attaques de l'homme du milieu. Une expiration non anticipée rend le service indisponible. Les certificats génériques (*.domaine) partagés entre de nombreux serveurs élargissent l'impact d'une fuite de clé privée.",
+  "comment_corriger": [
+    "Automatiser le renouvellement (ACME / Let's Encrypt ou équivalent) et surveiller les dates d'expiration.",
+    "Vérifier que le certificat couvre tous les noms servis et que la chaîne intermédiaire est complète.",
+    "Limiter l'usage des certificats génériques et protéger les clés privées.",
+    "Surveiller les journaux Certificate Transparency pour détecter une émission non autorisée."
+  ],
+  "references": [
+    {"titre": "RFC 6962 — Certificate Transparency", "url": "https://www.rfc-editor.org/rfc/rfc6962"},
+    {"titre": "CWE-298 — Improper Validation of Certificate Expiration", "url": "https://cwe.mitre.org/data/definitions/298.html"},
+    {"titre": "CWE-295 — Improper Certificate Validation", "url": "https://cwe.mitre.org/data/definitions/295.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

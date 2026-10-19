@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 # fallback Ollama Map-Reduce, ~20-25 min mesurés), seulement un cas
 # réellement figé.
 _STEP_TIMEOUTS_S = {
+    # Pipeline déclenché par l'API (POST /verify_email → n8n) mais pas encore
+    # démarré par pass_recon : n8n enchaîne en quelques secondes.
+    'queued':                  int(os.getenv('WATCHDOG_QUEUED_PIPELINE_TIMEOUT_S', 900)),
     'scanning_osint':          int(os.getenv('WATCHDOG_SCANNING_TIMEOUT_S', 1200)),   # mesuré : 216-307s en usage normal
     'analyzing_ai':            int(os.getenv('WATCHDOG_ANALYZING_TIMEOUT_S', 2400)),  # mesuré : jusqu'à ~25 min (Ollama)
     # En file d'attente du verrou Ollama (utils/ollama_lock.py) — seuil au-delà
@@ -59,6 +62,7 @@ _STEP_TIMEOUTS_S = {
 _NO_STEP_TIMEOUT_S = int(os.getenv('WATCHDOG_NO_STEP_TIMEOUT_S', 900))
 
 _ERROR_TYPE_BY_STEP = {
+    'queued':                  'workflow_failed',
     'scanning_osint':          'scan_failed',
     'analyzing_ai':            'analyze_failed',
     'analyzing_ai_queued':     'analyze_failed',
@@ -137,16 +141,55 @@ def _sweep_once(app) -> None:
             logger.exception("[watchdog] échec du sweep (current_step NULL)")
 
 
+# Purge RGPD (utils/retention.py) : greffée sur cette boucle plutôt qu'un
+# second thread — même cycle de vie, même désactivation sous pytest.
+_RETENTION_INTERVAL_S = int(os.getenv('RETENTION_INTERVAL_S', 3600))
+
+
+def _run_retention(app) -> None:
+    from utils.retention import purge
+    with app.app_context():
+        try:
+            purge()
+        except Exception:
+            logger.exception("[retention] échec de la purge")
+            from database import db
+            db.session.rollback()
+
+
+# Catalogue CISA KEV (utils/kev.py, phase 3) : même greffe que la purge. Le
+# module ne retélécharge qu'au-delà de KEV_REFRESH_HOURS ; ce point d'appel
+# horaire sert seulement à ce que la première analyse du jour ne paie pas le
+# téléchargement. Best-effort, jamais bloquant.
+_KEV_CHECK_INTERVAL_S = int(os.getenv('KEV_CHECK_INTERVAL_S', 3600))
+
+
+def _run_kev_refresh() -> None:
+    try:
+        from utils.kev import refresh
+        refresh()
+    except Exception:
+        logger.exception("[kev] échec du rafraîchissement (non bloquant)")
+
+
 def _loop(app) -> None:
     logger.info(
-        "[watchdog] démarré — intervalle=%ds, seuils=%s, sans étape=%ds",
-        _CHECK_INTERVAL_S, _STEP_TIMEOUTS_S, _NO_STEP_TIMEOUT_S,
+        "[watchdog] démarré — intervalle=%ds, seuils=%s, sans étape=%ds, purge toutes les %ds",
+        _CHECK_INTERVAL_S, _STEP_TIMEOUTS_S, _NO_STEP_TIMEOUT_S, _RETENTION_INTERVAL_S,
     )
+    last_retention = 0.0
+    last_kev = float("-inf")   # premier passage immédiat
     while True:
         try:
             _sweep_once(app)
         except Exception:
             logger.exception("[watchdog] erreur inattendue dans la boucle")
+        if time.monotonic() - last_retention >= _RETENTION_INTERVAL_S:
+            _run_retention(app)
+            last_retention = time.monotonic()
+        if time.monotonic() - last_kev >= _KEV_CHECK_INTERVAL_S:
+            _run_kev_refresh()
+            last_kev = time.monotonic()
         time.sleep(_CHECK_INTERVAL_S)
 
 

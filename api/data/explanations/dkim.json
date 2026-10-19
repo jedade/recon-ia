@@ -1,0 +1,20 @@
+{
+  "id": "dkim",
+  "titre": "DKIM — signature cryptographique des courriels",
+  "categorie": "Messagerie",
+  "outils": ["dkim_check"],
+  "pourquoi": "DKIM (DomainKeys Identified Mail) fait signer chaque courriel sortant par le serveur d'envoi ; la clé publique correspondante est publiée dans le DNS sous un sélecteur (selecteur._domainkey.votre-domaine). Le destinataire vérifie que le message n'a pas été modifié et qu'il a bien été émis par un serveur détenant la clé privée du domaine. C'est l'un des deux piliers sur lesquels DMARC s'appuie.",
+  "risque": "Sans DKIM, l'authenticité des messages repose uniquement sur SPF, qui casse lors des transferts (redirections, listes de diffusion). DMARC échoue alors plus souvent pour du courrier légitime, ce qui pousse à rester en p=none. Une clé trop courte (RSA 1024 bits ou moins) peut être cassée et permettre de signer de faux messages. La détection passive ne teste que des sélecteurs courants : un sélecteur personnalisé peut échapper au contrôle.",
+  "comment_corriger": [
+    "Activer la signature DKIM chez chaque fournisseur d'envoi (Microsoft 365, Google Workspace, outil d'emailing).",
+    "Publier dans le DNS les clés publiques fournies, sous les sélecteurs indiqués.",
+    "Utiliser des clés RSA d'au moins 2048 bits (ou Ed25519 en complément).",
+    "Prévoir une rotation périodique des clés et révoquer (p= vide) les sélecteurs abandonnés."
+  ],
+  "exemple": "selector1._domainkey.exemple.bj. TXT \"v=DKIM1; k=rsa; p=MIIBIjANBgkqh...\"",
+  "references": [
+    {"titre": "RFC 6376 — DKIM Signatures", "url": "https://www.rfc-editor.org/rfc/rfc6376"},
+    {"titre": "RFC 8301 — Cryptographic Algorithm and Key Usage Update to DKIM", "url": "https://www.rfc-editor.org/rfc/rfc8301"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

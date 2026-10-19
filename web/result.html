@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voir le résultat — Recon IA</title>
+    <!-- Page de consultation par code d'accès (plan d'action, phase 2).
+         CSP stricte : aucun script ni style inline (tout est dans
+         result.js / result.css), car la page affiche des données
+         collectées sur des sites tiers et du texte produit par un LLM.
+         connect-src http: https: — l'URL de l'API vient de config.js
+         (http://api.localhost en local, https en production).
+         frame-ancestors est ignoré dans une balise meta : l'interdiction
+         d'affichage en iframe est posée par Caddy (en-têtes HTTP). -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self';
+        style-src 'self' https://fonts.googleapis.com;
+        font-src https://fonts.gstatic.com;
+        img-src 'self' data:;
+        connect-src 'self' http: https:;
+        object-src 'none';
+        base-uri 'none';
+        form-action 'none';
+    ">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Mono&display=swap">
+    <link rel="stylesheet" href="result.css">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="index.html">Recon <span>IA</span></a>
+        <nav class="topbar-actions">
+            <button type="button" class="ghost" id="theme-toggle" aria-label="Changer de thème">◐</button>
+            <button type="button" class="ghost hidden" id="logout-btn">Fermer la session</button>
+        </nav>
+    </header>
+
+    <main id="app">
+        <!-- Étape 1 : saisie du code -->
+        <section id="access-view" class="access">
+            <h1>Voir le résultat</h1>
+            <p class="muted">
+                Saisissez le code d'accès reçu par email à la fin de l'analyse.
+                Il est le seul moyen de déchiffrer votre rapport : nous ne le conservons pas.
+            </p>
+            <form id="access-form" class="card access-card" autocomplete="off" novalidate>
+                <label for="access-code">Code d'accès</label>
+                <div class="code-row">
+                    <input id="access-code" name="access-code" type="password" required
+                           minlength="43" maxlength="64" spellcheck="false" autocapitalize="off"
+                           autocomplete="off" placeholder="43 caractères">
+                    <button type="button" class="ghost" id="toggle-code" aria-label="Afficher le code">👁</button>
+                </div>
+                <button type="submit" class="primary" id="access-submit">Ouvrir le rapport</button>
+                <p id="access-message" class="message hidden" role="alert"></p>
+            </form>
+            <p class="muted small">
+                Le code est valable 30 jours. La session de consultation dure une heure ;
+                fermez-la si vous utilisez un ordinateur partagé.
+            </p>
+        </section>
+
+        <!-- Étape 2 : rapport -->
+        <section id="report-view" class="hidden" aria-live="polite">
+            <div id="report-header" class="report-header"></div>
+            <div id="report-sections"></div>
+        </section>
+
+        <p id="loading" class="loading hidden">Chargement…</p>
+    </main>
+
+    <dialog id="info-modal">
+        <form method="dialog" class="modal-inner">
+            <h3 id="info-title"></h3>
+            <div id="info-body"></div>
+            <button class="primary" value="close">Fermer</button>
+        </form>
+    </dialog>
+
+    <script src="config.js"></script>
+    <script src="result.js"></script>
+</body>
+</html>

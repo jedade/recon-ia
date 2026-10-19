@@ -1,0 +1,22 @@
+{
+  "id": "en_tetes_securite",
+  "titre": "Autres en-têtes de sécurité HTTP (X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)",
+  "categorie": "Web",
+  "outils": ["security_headers", "http_observatory", "headers"],
+  "pourquoi": "Quelques en-têtes HTTP simples durcissent le comportement du navigateur : X-Frame-Options (ou frame-ancestors de CSP) interdit d'afficher le site dans un cadre tiers ; X-Content-Type-Options: nosniff empêche le navigateur de deviner un type de fichier ; Referrer-Policy limite les informations d'URL transmises aux sites tiers ; Permissions-Policy désactive les fonctions sensibles (caméra, micro, géolocalisation) inutiles au site.",
+  "risque": "Leur absence ouvre la porte au clickjacking (l'utilisateur clique à son insu sur un bouton de votre site affiché en transparence), à l'exécution de fichiers téléversés interprétés comme du script, et à la fuite de paramètres sensibles d'URL (jetons, identifiants) vers des tiers. Les en-têtes qui révèlent la version du serveur (Server, X-Powered-By) facilitent en outre le ciblage de vulnérabilités connues.",
+  "comment_corriger": [
+    "Ajouter X-Content-Type-Options: nosniff sur toutes les réponses.",
+    "Ajouter X-Frame-Options: DENY (ou SAMEORIGIN) et frame-ancestors dans la CSP.",
+    "Définir Referrer-Policy: strict-origin-when-cross-origin (ou no-referrer).",
+    "Définir une Permissions-Policy restrictive pour les fonctions non utilisées.",
+    "Masquer ou réduire les en-têtes Server et X-Powered-By."
+  ],
+  "exemple": "X-Content-Type-Options: nosniff\nX-Frame-Options: DENY\nReferrer-Policy: strict-origin-when-cross-origin\nPermissions-Policy: camera=(), microphone=(), geolocation=()",
+  "references": [
+    {"titre": "OWASP — HTTP Headers Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html"},
+    {"titre": "OWASP Secure Headers Project", "url": "https://owasp.org/www-project-secure-headers/"},
+    {"titre": "CWE-1021 — Improper Restriction of Rendered UI Layers (clickjacking)", "url": "https://cwe.mitre.org/data/definitions/1021.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

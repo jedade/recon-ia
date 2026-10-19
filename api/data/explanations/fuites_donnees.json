@@ -1,0 +1,20 @@
+{
+  "id": "fuites_donnees",
+  "titre": "Fuites de données touchant les adresses du domaine",
+  "categorie": "Réputation",
+  "outils": ["xposedornot_breaches", "github", "gau_urls"],
+  "pourquoi": "Lorsqu'un service en ligne est piraté, ses bases d'utilisateurs (adresses électroniques, mots de passe plus ou moins protégés) finissent souvent publiées ou revendues. Recon-IA interroge un service public d'agrégation de fuites pour quelques adresses génériques du domaine (admin@, contact@…), sans tester d'adresses personnelles. Les dépôts de code publics et les archives d'URL peuvent aussi exposer des secrets.",
+  "risque": "Des identifiants issus de fuites servent au « credential stuffing » : les attaquants les essaient automatiquement sur la messagerie, le VPN et les applications de l'organisation. La réutilisation d'un même mot de passe sur plusieurs services transforme une fuite chez un tiers en compromission directe.",
+  "comment_corriger": [
+    "Changer les mots de passe des comptes concernés et interdire leur réutilisation.",
+    "Activer l'authentification multifacteur sur la messagerie, le VPN et les accès d'administration.",
+    "Surveiller les fuites du domaine dans la durée (services de notification).",
+    "Rechercher et révoquer les secrets (clés d'API, mots de passe) publiés dans des dépôts de code."
+  ],
+  "references": [
+    {"titre": "OWASP — Credential Stuffing Prevention Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html"},
+    {"titre": "CAPEC-600 — Credential Stuffing", "url": "https://capec.mitre.org/data/definitions/600.html"},
+    {"titre": "CWE-798 — Use of Hard-coded Credentials", "url": "https://cwe.mitre.org/data/definitions/798.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

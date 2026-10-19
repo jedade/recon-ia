@@ -80,6 +80,9 @@ class Recon(db.Model):
     verification = db.Column(db.Boolean, default=False, nullable=False)
     otp_code     = db.Column(db.String(6),   nullable=True)
     otp_sent_at  = db.Column(db.DateTime,    nullable=True)   # horodatage d'envoi du code
+    # Tentatives incorrectes sur le code en cours (anti brute-force réparti,
+    # voir routes/crud.py::_OTP_MAX_ATTEMPTS)
+    otp_attempts = db.Column(db.Integer, nullable=False, default=0)
 
     # --- Horodatage du cycle rapport ---
     # Rempli automatiquement à la vérification email (déclenchement du flow)
@@ -127,6 +130,28 @@ class Recon(db.Model):
 
     # Idem : présence de l'analyse évaluée en SQL, sans rapatrier le rapport.
     has_analysis = db.column_property(_analysis_result_col.isnot(None))
+
+    # --- Coffre des résultats (2026-10-19, utils/result_vault.py) ---
+    # En fin de pipeline, scan_results / analysis_result / final_report sont
+    # chiffrés ensemble dans `sealed_bundle` et le PDF dans `sealed_pdf`
+    # (AES-256-GCM, clé dérivée du code d'accès envoyé par mail), puis les
+    # colonnes en clair ci-dessus sont vidées. Le serveur ne peut plus relire
+    # ces données sans le code : l'admin ne voit que les métadonnées.
+    sealed_bundle = db.deferred(db.Column(db.LargeBinary, nullable=True))
+    sealed_pdf    = db.deferred(db.Column(db.LargeBinary, nullable=True))
+    sealed_at     = db.Column(db.DateTime, nullable=True)
+    # Sel HKDF propre au dossier (hex) — pas un secret
+    access_salt       = db.Column(db.String(32), nullable=True)
+    # HMAC-SHA256(RESULTS_ACCESS_SECRET, code) — sert uniquement à retrouver
+    # le dossier, ne permet pas de déchiffrer
+    access_token_hash = db.Column(db.String(64), nullable=True, unique=True, index=True)
+    access_expires_at = db.Column(db.DateTime, nullable=True)
+    access_revoked_at = db.Column(db.DateTime, nullable=True)
+    access_count      = db.Column(db.Integer, nullable=False, default=0)
+    last_access_at    = db.Column(db.DateTime, nullable=True)
+    # Purge RGPD (utils/retention.py) : contenu chiffré effacé et identité
+    # anonymisée quelques jours après expiration/révocation du code
+    results_purged_at = db.Column(db.DateTime, nullable=True)
 
     # --- Score de sécurité dénormalisé ---
     # Copie de analysis_result['security_score'] / ['security_grade'].
@@ -384,6 +409,19 @@ class Recon(db.Model):
             return max(0.0, (self.end_report_date - self.start_report_date).total_seconds())
         return None
 
+    def access_state(self, now=None) -> str:
+        """
+        État du code d'accès : `none` (jamais émis), `revoked`, `expired` ou
+        `active`. La révocation prime sur l'expiration.
+        """
+        if not self.access_token_hash:
+            return 'none'
+        if self.access_revoked_at is not None:
+            return 'revoked'
+        if self.access_expires_at is None or self.access_expires_at <= (now or _dt.utcnow()):
+            return 'expired'
+        return 'active'
+
     def to_dict(self) -> dict:
         """
         Représentation publique — sans données sensibles (scan_results, final_report).
@@ -425,6 +463,14 @@ class Recon(db.Model):
             'tokens_prompt': self.tokens_prompt,
             'tokens_completion': self.tokens_completion,
             'tokens_total': self.tokens_total,
+            # Coffre : jamais le code, ni son empreinte, ni le sel
+            'results_sealed': self.sealed_at is not None,
+            'sealed_at': utc_iso(self.sealed_at),
+            'access_state': self.access_state(),
+            'access_expires_at': utc_iso(self.access_expires_at),
+            'access_count': self.access_count or 0,
+            'last_access_at': utc_iso(self.last_access_at),
+            'results_purged_at': utc_iso(self.results_purged_at),
             'started_at': utc_iso(self.started_at),
             'completed_at': utc_iso(self.completed_at),
             'start_report_date': utc_iso(self.start_report_date),
@@ -439,6 +485,9 @@ class Recon(db.Model):
 
         Réservée à : GET /recon/<id>/report (accès restreint, authentification requise).
         scan_results est désérialisé depuis JSON en dict Python.
+
+        Pour un dossier scellé, les trois champs valent None : leur contenu
+        n'existe plus qu'en chiffré (voir `results_sealed`).
         """
         d = self.to_dict()
         d['scan_results']            = json.loads(self.scan_results) if self.scan_results else None

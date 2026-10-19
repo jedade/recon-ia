@@ -1,0 +1,20 @@
+{
+  "id": "takeover",
+  "titre": "Prise de contrôle de sous-domaine (subdomain takeover)",
+  "categorie": "DNS",
+  "outils": ["subdomain_takeover", "dns_records", "all_subdomains"],
+  "pourquoi": "Un sous-domaine pointe souvent, par un enregistrement CNAME, vers un service externe (hébergement de pages, stockage objet, plateforme SaaS). Si le service est supprimé mais que l'enregistrement DNS reste en place (« CNAME orphelin »), n'importe qui peut parfois créer chez ce fournisseur une ressource du même nom et prendre ainsi le contrôle du sous-domaine. Le projet communautaire can-i-take-over-xyz recense les services concernés et leurs signatures.",
+  "risque": "L'attaquant sert alors son propre contenu sous votre nom de domaine : hameçonnage très crédible, vol de cookies posés sur le domaine parent, contournement de politiques CORS ou CSP qui font confiance aux sous-domaines, atteinte à la réputation. Recon-IA ne fait qu'une détection passive (résolution DNS) : un résultat est un indice à vérifier, pas une preuve.",
+  "comment_corriger": [
+    "Supprimer les enregistrements DNS dès qu'un service externe est décommissionné (et dans cet ordre : DNS d'abord).",
+    "Tenir un inventaire des sous-domaines et des services tiers vers lesquels ils pointent.",
+    "Vérifier chaque alerte : la ressource existe-t-elle encore chez le fournisseur ?",
+    "Réclamer ou recréer la ressource orpheline en urgence si le sous-domaine est encore nécessaire."
+  ],
+  "references": [
+    {"titre": "can-i-take-over-xyz (EdOverflow, CC BY 4.0)", "url": "https://github.com/EdOverflow/can-i-take-over-xyz"},
+    {"titre": "OWASP WSTG — Test for Subdomain Takeover", "url": "https://owasp.org/www-project-web-security-testing-guide/"},
+    {"titre": "CWE-350 — Reliance on Reverse DNS Resolution for a Security-Critical Action", "url": "https://cwe.mitre.org/data/definitions/350.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

@@ -22,7 +22,7 @@ echo "=== [provision] Génération des credentials depuis l'environnement ==="
 node /generate-credentials.js "$CRED_FILE" \
   && n8n import:credentials --input="$CRED_FILE" \
   || echo "=== [provision] AVERTISSEMENT : import des credentials échoué, on continue ==="
-# $CRED_FILE contient des mots de passe en clair (Postgres, admin API) : ne
+# $CRED_FILE contient des secrets en clair (Postgres, jetons API/webhook) : ne
 # doit pas traîner sur disque une fois importé dans le stockage chiffré n8n.
 rm -f "$CRED_FILE"
 
@@ -36,7 +36,7 @@ echo "=== [provision] Import et activation des workflows ==="
 # attendant un diagnostic plus poussé (à refaire sur le serveur de prod
 # Linux, où les caractéristiques I/O diffèrent). Activer manuellement une
 # fois le problème résolu : `n8n update:workflow --id=8481rbwSG3V1qzCT --active=true`.
-for entry in "rag-ingestion:8481rbwSG3V1qzCT:false" "recon-ia-main:AdOmMwjGgxh9Ljm6:true"; do
+for entry in "rag-ingestion:8481rbwSG3V1qzCT:false" "recon-ia-main:AdOmMwjGgxh9Ljm6:true" "recon-ia-rescan:RcnIaRescanWf007:false"; do
   wf_file=$(echo "$entry" | cut -d: -f1)
   wf_id=$(echo "$entry" | cut -d: -f2)
   wf_activate=$(echo "$entry" | cut -d: -f3)
@@ -48,9 +48,10 @@ for entry in "rag-ingestion:8481rbwSG3V1qzCT:false" "recon-ia-main:AdOmMwjGgxh9L
   fi
 
   sed \
-    -e "s/__CRED_POSTGRES_ID__/reconiaPostgresAuto/g" \
+    -e "s/__CRED_POSTGRES_ID__/reconiaPostgresRagWriterV2/g" \
     -e "s/__CRED_OLLAMA_ID__/reconiaOllamaAuto/g" \
-    -e "s/__CRED_API_BASICAUTH_ID__/reconiaApiBasicAuthAutoV2/g" \
+    -e "s/__CRED_API_SERVICE_ID__/reconiaApiServiceTokenAutoV1/g" \
+    -e "s/__CRED_WEBHOOK_SECRET_ID__/reconiaWebhookSecretAutoV1/g" \
     "$src" > "/tmp/$wf_file.json"
 
   n8n import:workflow --input="/tmp/$wf_file.json" \

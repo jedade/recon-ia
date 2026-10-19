@@ -1,0 +1,51 @@
+# caddy/Caddyfile — reverse proxy TLS, SEUL service publié sur Internet
+# (plan d'action, phase 1, décision D5).
+#
+# Adresses fournies par le .env racine :
+#   SITE_ADDRESS  frontend public (formulaire, page « Voir le résultat »)
+#   API_ADDRESS   API Flask
+# Un nom de domaine (ex. recon.idachallenge.bj) active le HTTPS automatique
+# (Let's Encrypt, renouvellement inclus) ; un préfixe http:// le désactive
+# (développement local : http://localhost, http://api.localhost).
+#
+# n8n, Postgres, Redis et Ollama ne sont PAS routés ici : ils ne sont
+# joignables que sur le réseau interne Docker. L'éditeur n8n s'ouvre via un
+# tunnel SSH vers 127.0.0.1:5678 (voir docker-compose.yml).
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# Anti-clickjacking : `frame-ancestors` n'est appliqué par les
+		# navigateurs que s'il vient d'un en-tête HTTP, pas d'une balise meta.
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'"
+		-Server
+	}
+}
+
+{$SITE_ADDRESS:http://localhost} {
+	encode zstd gzip
+	import security_headers
+	reverse_proxy web:80
+}
+
+{$API_ADDRESS:http://api.localhost} {
+	encode zstd gzip
+	import security_headers
+	# Le jeton de service de n8n (api/utils/auth.py) n'est valable que sur le
+	# réseau interne : on le retire de toute requête venue d'Internet, pour
+	# qu'un jeton divulgué reste inutilisable depuis l'extérieur.
+	request_header -X-Service-Token
+	request_body {
+		max_size 2MB
+	}
+	# Caddy écrase X-Forwarded-For avec l'IP réelle du client (aucun proxy
+	# amont déclaré de confiance) : l'API (ProxyFix, TRUSTED_PROXY_COUNT=1)
+	# voit donc la vraie IP, impossible à usurper par un en-tête forgé.
+	reverse_proxy api:8080
+}

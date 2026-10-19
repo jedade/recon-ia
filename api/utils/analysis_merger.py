@@ -107,16 +107,24 @@ def _merge_findings(findings_a: List[Dict], findings_b: List[Dict]) -> List[Dict
             if isinstance(new_ev, str) and len(new_ev) > len(old_ev or ""):
                 existing["evidence"] = new_ev
 
-            # Union references et web_sources
+            # Union references et web_sources. Depuis la phase 3, `references`
+            # est une liste d'objets {collection, source} (schéma §9.3) : clé
+            # de déduplication = collection + source normalisée.
+            def _ref_key(x: Any) -> str:
+                if isinstance(x, dict):
+                    return f"{_norm(x.get('collection'))}|{_norm(x.get('source'))}"
+                return _norm(x) if isinstance(x, str) else ""
+
             for field in ("references", "web_sources"):
                 existing_list = existing.get(field) or []
                 new_list      = finding.get(field) or []
                 if isinstance(new_list, list):
-                    seen_norm = {_norm(x) for x in existing_list if isinstance(x, str)}
+                    seen_norm = {_ref_key(x) for x in existing_list}
                     for item in new_list:
-                        if isinstance(item, str) and _norm(item) not in seen_norm:
+                        k = _ref_key(item)
+                        if k and k not in seen_norm:
                             existing_list.append(item)
-                            seen_norm.add(_norm(item))
+                            seen_norm.add(k)
                 existing[field] = existing_list
 
     # Trier : CRITICAL → HIGH → MEDIUM → LOW → INFO

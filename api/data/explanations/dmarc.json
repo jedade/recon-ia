@@ -1,0 +1,22 @@
+{
+  "id": "dmarc",
+  "titre": "DMARC — politique anti-usurpation de l'expéditeur",
+  "categorie": "Messagerie",
+  "outils": ["dmarc_check", "email_config"],
+  "pourquoi": "DMARC (Domain-based Message Authentication, Reporting and Conformance) indique aux serveurs de messagerie destinataires ce qu'ils doivent faire d'un courriel qui prétend venir de votre domaine mais échoue aux contrôles SPF et DKIM. Il ajoute la notion d'alignement : le domaine visible par l'utilisateur dans le champ « From » doit correspondre au domaine validé par SPF ou DKIM. Il permet aussi de recevoir des rapports agrégés sur qui envoie du courrier en votre nom.",
+  "risque": "Sans DMARC, ou avec une politique p=none, n'importe qui peut envoyer des courriels affichant votre domaine comme expéditeur : hameçonnage de vos clients, fraude au président, faux avis de paiement. Les destinataires n'ont aucune consigne pour rejeter ces messages, et vous n'avez aucune visibilité sur ces abus.",
+  "comment_corriger": [
+    "Vérifier d'abord que SPF et DKIM sont en place pour toutes vos sources d'envoi légitimes (serveur interne, Microsoft 365, Google Workspace, outil d'emailing, CRM).",
+    "Publier un enregistrement TXT sur _dmarc.votre-domaine avec p=none et une adresse rua= pour collecter les rapports pendant quelques semaines.",
+    "Analyser les rapports et corriger les sources légitimes non alignées.",
+    "Passer progressivement à p=quarantine puis p=reject (le paramètre pct= permet une montée en charge).",
+    "Couvrir les sous-domaines (sp=) et publier p=reject directement pour les domaines qui n'envoient jamais de courriel."
+  ],
+  "exemple": "_dmarc.exemple.bj. TXT \"v=DMARC1; p=reject; sp=reject; rua=mailto:dmarc@exemple.bj; adkim=s; aspf=s\"",
+  "references": [
+    {"titre": "RFC 7489 — DMARC", "url": "https://www.rfc-editor.org/rfc/rfc7489"},
+    {"titre": "CWE-290 — Authentication Bypass by Spoofing", "url": "https://cwe.mitre.org/data/definitions/290.html"},
+    {"titre": "CAPEC-98 — Phishing", "url": "https://capec.mitre.org/data/definitions/98.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

@@ -1,212 +1,153 @@
 {
-  "name": "RECON IA WORKFLOW V2",
+  "name": "RECON IA WORKFLOW V3",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "dfb160f6-daa7-4d3f-bd33-09f4a6797c65",
-        "responseMode": "responseNode",
-        "options": {
-          "allowedOrigins": "*"
-        }
+        "path": "recon-ia-pipeline",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "responseCode": 202,
+        "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        -2144,
-        -128
-      ],
+      "position": [-1744, -48],
       "id": "8149e9b3-77e8-4f77-9727-0d910ff32e70",
       "name": "Webhook",
-      "webhookId": "dfb160f6-daa7-4d3f-bd33-09f4a6797c65"
-    },
-    {
-      "parameters": {
-        "respondWith": "allIncomingItems",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.4,
-      "position": [
-        -1376,
-        -128
-      ],
-      "id": "cbf330c1-6f69-4779-8261-70606987ad86",
-      "name": "Respond to Webhook"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.DOMAIN_URL_API }}/verify_email",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpBasicAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"code\": \"{{ $json.body.code }}\",\n  \"email\": \"{{ $json.body.email }}\"\n} ",
-        "options": {
-          "timeout": 1000620000,
-          "response": {
-            "response": {
-              "neverError": true
-            }
-          }
-        }
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -1744,
-        -144
-      ],
-      "id": "d17b81bb-386b-475f-8c42-66f0519b4826",
-      "name": "Verify email for launch repporting",
+      "webhookId": "5c0b4f0e-7a51-4c55-9d38-2f4c1d7e9a01",
       "credentials": {
-        "httpBasicAuth": {
-          "id": "__CRED_API_BASICAUTH_ID__",
-          "name": "Recon IA API account (auto)"
+        "httpHeaderAuth": {
+          "id": "__CRED_WEBHOOK_SECRET_ID__",
+          "name": "Recon IA webhook secret (auto)"
         }
       }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.DOMAIN_URL_API }}/pass_recon",
+        "url": "http://api:8080/pass_recon",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpBasicAuth",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={ \"recon_id\": {{ $json.data.id }} } ",
+        "jsonBody": "={ \"recon_id\": {{ Number($('Webhook').first().json.body.recon_id) }} }",
         "options": {
           "timeout": 1000620000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -1392,
-        64
-      ],
+      "position": [-1392, -48],
       "id": "1d1250f8-8d6b-4d6f-9572-46ea0a39e126",
       "name": "Launch Passive Recon",
       "credentials": {
-        "httpBasicAuth": {
-          "id": "__CRED_API_BASICAUTH_ID__",
-          "name": "Recon IA API account (auto)"
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
         }
       }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.DOMAIN_URL_API }}/analyze/async",
+        "url": "http://api:8080/analyze/async",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpBasicAuth",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={ \"recon_id\": {{ $json.recon_id }} } ",
+        "jsonBody": "={ \"recon_id\": {{ Number($('Webhook').first().json.body.recon_id) }} }",
         "options": {
           "timeout": null
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -1152,
-        64
-      ],
+      "position": [-1152, -48],
       "id": "7b359d1e-fd57-43eb-becd-de46d171f07f",
       "name": "Start Analysis (async)",
       "credentials": {
-        "httpBasicAuth": {
-          "id": "__CRED_API_BASICAUTH_ID__",
-          "name": "Recon IA API account (auto)"
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
         }
       }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.DOMAIN_URL_API }}/analyze/wait/{{ $json.recon_id }}?timeout=600",
+        "url": "=http://api:8080/analyze/wait/{{ Number($('Webhook').first().json.body.recon_id) }}?timeout=600",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpBasicAuth",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={  } ",
+        "jsonBody": "={ }",
         "options": {
           "timeout": 620000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -1008,
-        -48
-      ],
+      "position": [-912, -48],
       "id": "e2fbde74-0c17-41a9-8675-85ee90b6b8c1",
       "name": "Wait for Analysis",
       "retryOnFail": true,
       "maxTries": 4,
       "waitBetweenTries": 2000,
       "credentials": {
-        "httpBasicAuth": {
-          "id": "__CRED_API_BASICAUTH_ID__",
-          "name": "Recon IA API account (auto)"
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
         }
       }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.DOMAIN_URL_API }}/recon/{{ $json.recon_id }}/generate_final_report",
+        "url": "=http://api:8080/recon/{{ Number($('Webhook').first().json.body.recon_id) }}/generate_final_report",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpBasicAuth",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={ } ",
+        "jsonBody": "={ }",
         "options": {
           "timeout": null
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -880,
-        -176
-      ],
+      "position": [-672, -48],
       "id": "1c6790cc-3fa6-4aa8-baa9-4a347ab062ad",
       "name": "Generate Final Report",
       "credentials": {
-        "httpBasicAuth": {
-          "id": "__CRED_API_BASICAUTH_ID__",
-          "name": "Recon IA API account (auto)"
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
         }
       }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.DOMAIN_URL_API }}/recon/{{ $json.recon_id }}/generate_report",
+        "url": "=http://api:8080/recon/{{ Number($('Webhook').first().json.body.recon_id) }}/generate_report",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpBasicAuth",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={} ",
+        "jsonBody": "={ }",
         "options": {
           "timeout": null
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -752,
-        80
-      ],
+      "position": [-432, -48],
       "id": "091aaf40-8423-41a2-b93e-4f30ef641349",
-      "name": "Generate PDF Report (+ email)",
+      "name": "Generate PDF, seal results (+ email with access code)",
       "credentials": {
-        "httpBasicAuth": {
-          "id": "__CRED_API_BASICAUTH_ID__",
-          "name": "Recon IA API account (auto)"
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
         }
       }
     }
@@ -214,75 +155,19 @@
   "pinData": {},
   "connections": {
     "Webhook": {
-      "main": [
-        [
-          {
-            "node": "Verify email for launch repporting",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Verify email for launch repporting": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Launch Passive Recon",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Launch Passive Recon", "type": "main", "index": 0 }]]
     },
     "Launch Passive Recon": {
-      "main": [
-        [
-          {
-            "node": "Start Analysis (async)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Start Analysis (async)", "type": "main", "index": 0 }]]
     },
     "Start Analysis (async)": {
-      "main": [
-        [
-          {
-            "node": "Wait for Analysis",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Wait for Analysis", "type": "main", "index": 0 }]]
     },
     "Wait for Analysis": {
-      "main": [
-        [
-          {
-            "node": "Generate Final Report",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Generate Final Report", "type": "main", "index": 0 }]]
     },
     "Generate Final Report": {
-      "main": [
-        [
-          {
-            "node": "Generate PDF Report (+ email)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Generate PDF, seal results (+ email with access code)", "type": "main", "index": 0 }]]
     }
   },
   "active": true,

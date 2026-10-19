@@ -194,11 +194,10 @@ cython_debug/
 .cursorindexingignore
 
 # Recon-IA — données de services locaux, backups et artefacts générés
-n8n_certs/
-certbot/conf/
+caddy_data/
+caddy_config/
 n8n_data/
 ollama/
-qdrant_data/
 postgres_data/
 n8n-backup.tar.gz
 web/*.pdf

@@ -479,7 +479,7 @@ class TestExportJson:
 EXPECTED_COLUMNS = [
     'finding_id', 'tool', 'tool_category', 'target', 'indicator', 'value',
     'severity', 'confidence', 'source_tool', 'source_url', 'collected_at',
-    'grounding_status',
+    'grounding_status', 'observed_at', 'severity_rule', 'attack_enabled', 'mitigations',
 ]
 
 

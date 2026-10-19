@@ -1,7 +1,8 @@
 // Généré au démarrage du conteneur `web` par l'entrypoint nginx (envsubst),
-// depuis DASHBOARD_API_BASE / WEBHOOK_BASE_URL (.env racine) — voir
+// depuis DASHBOARD_API_BASE / TURNSTILE_SITE_KEY (.env racine) — voir
 // docker-compose.yml. Ne pas éditer ce fichier ni web/config.js directement :
 // toute modification serait écrasée au prochain redémarrage du conteneur.
-// Consommé par web/dashboard.html (API_BASE) ET web/index.html (API_BASE +
-// WEBHOOK_BASE, le webhook n8n public qui déclenche recon-ia-main.json).
-window.RECON_IA_CONFIG = { API_BASE: "${DASHBOARD_API_BASE}", WEBHOOK_BASE: "${WEBHOOK_BASE_URL}" };
+// Consommé par index.html (formulaire), result.html (consultation par code)
+// et dashboard.html (admin) : ces trois pages ne parlent qu'à l'API, jamais
+// à n8n (plan d'action, phase 1).
+window.RECON_IA_CONFIG = { API_BASE: "${DASHBOARD_API_BASE}", TURNSTILE_SITE_KEY: "${TURNSTILE_SITE_KEY}" };

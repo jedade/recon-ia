@@ -16,17 +16,18 @@
         font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:;
         img-src 'self' data: https:;
         connect-src 'self' http: https:;
-        frame-ancestors 'none';
         base-uri 'self';
         form-action 'none';
     ">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <meta http-equiv="X-Frame-Options" content="DENY">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="robots" content="noindex, nofollow">
 
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <!-- Phase 7 (graphe, différentiel, surveillance) : style et script dans
+         des fichiers dédiés, aucun nouveau style/script inline. -->
+    <link rel="stylesheet" href="dashboard-graph.css">
 
     <style>
         :root {
@@ -647,6 +648,12 @@
         <button class="dash-tab metier active" data-tab="metier">
             <i class="fas fa-satellite-dish"></i> Reconnaissances &amp; Rapports
         </button>
+        <button class="dash-tab metier" data-tab="cache">
+            <i class="fas fa-database"></i> Scans bruts (cache)
+        </button>
+        <button class="dash-tab metier" data-tab="graph">
+            <i class="fas fa-diagram-project"></i> Graphe &amp; surveillance
+        </button>
         <button class="dash-tab tech" data-tab="tech">
             <i class="fas fa-server"></i> Logs Applicatifs
         </button>
@@ -808,6 +815,168 @@
             </div>
 
         </div><!-- /tab-metier -->
+
+        <!-- ════ TAB SCANS BRUTS (cache pass_recon_cache) ════
+             Résultats BRUTS des scans OSINT, en clair, par domaine : données
+             publiques, sans analyse IA ni donnée du demandeur. Restent
+             consultables ici même quand le dossier est scellé (son rapport
+             n'est lisible qu'avec le code du demandeur) et après expiration
+             du cache (une entrée expirée n'est plus servie au pipeline). -->
+        <div class="tab-panel" id="tab-cache">
+            <div class="logs-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-database"></i> Scans bruts en cache</div>
+                    <div class="logs-filters">
+                        <input type="text" class="filter-input" id="filter-cache-domain" placeholder="Rechercher un domaine…">
+                        <select class="filter-select" id="filter-cache-valid">
+                            <option value="">Toutes</option>
+                            <option value="true">Valides</option>
+                            <option value="false">Expirées</option>
+                        </select>
+                        <button class="btn-icon" id="btn-apply-cache-filters"><i class="fas fa-filter"></i> Filtrer</button>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Domaine</th>
+                                <th>Outils</th>
+                                <th>Sous-domaines</th>
+                                <th>Durée scan</th>
+                                <th>Mis à jour</th>
+                                <th>Expire</th>
+                                <th>État</th>
+                                <th>Réutilisations</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cache-tbody">
+                            <tr><td colspan="10" class="empty-state">Ouvrez cet onglet pour charger les scans.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="logs-footer">
+                    <span id="cache-count">—</span>
+                    <div style="display:flex;gap:0.5rem;align-items:center">
+                        <button class="btn-icon" id="btn-cache-prev" disabled><i class="fas fa-chevron-left"></i></button>
+                        <span id="cache-page-info">—</span>
+                        <button class="btn-icon" id="btn-cache-next" disabled><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div><!-- /tab-cache -->
+
+        <!-- ════ TAB GRAPHE & SURVEILLANCE (phase 7) ════
+             Graphe d'entités techniques publiques (domaine → sous-domaines →
+             IP → ASN → certificat → technologies → CVE), différentiels entre
+             scans, surveillance planifiée opt-in et export des hôtes vivants.
+             Rendu exclusivement par web/dashboard-graph.js (textContent). -->
+        <div class="tab-panel" id="tab-graph">
+            <div class="logs-card g7-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-diagram-project"></i> Graphe d'entités</div>
+                    <div class="logs-filters">
+                        <input type="text" class="filter-input" id="graph-domain" placeholder="Domaine (vide = global)">
+                        <button class="btn-icon" id="btn-graph-load"><i class="fas fa-magnifying-glass"></i> Charger</button>
+                        <button class="btn-icon" id="btn-graph-export-csv" disabled title="Hôtes vivants, CSV (admin)"><i class="fas fa-file-csv"></i> Hôtes vivants CSV</button>
+                        <button class="btn-icon" id="btn-graph-export-json" disabled title="Hôtes vivants, JSON (admin)"><i class="fas fa-file-code"></i> Hôtes vivants JSON</button>
+                    </div>
+                </div>
+                <p class="g7-notice" id="graph-export-notice">
+                    Export des hôtes vivants : issu d'une reconnaissance passive, destiné à une phase active
+                    <strong>autorisée par écrit</strong> et menée hors de Recon-IA.
+                </p>
+                <div class="stats-grid g7-pad" id="graph-counters">
+                    <div class="empty-state">Ouvrez cet onglet pour charger le graphe.</div>
+                </div>
+                <div class="g7-toolbar">
+                    <select class="filter-select" id="graph-type-filter">
+                        <option value="">Tous types</option>
+                        <option value="domain">Domaine</option>
+                        <option value="subdomain">Sous-domaine</option>
+                        <option value="ip">IP</option>
+                        <option value="port">Port</option>
+                        <option value="asn">ASN</option>
+                        <option value="organization">Organisation</option>
+                        <option value="certificate">Certificat</option>
+                        <option value="technology">Technologie</option>
+                        <option value="vulnerability">Vulnérabilité (CVE)</option>
+                    </select>
+                    <input type="text" class="filter-input" id="graph-entity-q" placeholder="Filtrer la valeur…">
+                    <button class="btn-icon" id="btn-graph-entities"><i class="fas fa-filter"></i> Filtrer</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Type</th><th>Valeur</th><th>Attributs</th><th>Première observation</th><th>Dernière observation</th></tr>
+                        </thead>
+                        <tbody id="graph-entities-tbody">
+                            <tr><td colspan="5" class="empty-state">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="logs-footer">
+                    <span id="graph-entities-count">—</span>
+                    <div class="g7-pager">
+                        <button class="btn-icon" id="btn-graph-prev" disabled><i class="fas fa-chevron-left"></i></button>
+                        <span id="graph-page-info">—</span>
+                        <button class="btn-icon" id="btn-graph-next" disabled><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="logs-card g7-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-code-compare"></i> Différentiels entre scans</div>
+                    <div class="logs-filters">
+                        <select class="filter-select" id="graph-snap-significant">
+                            <option value="">Tous</option>
+                            <option value="true">Significatifs</option>
+                        </select>
+                        <button class="btn-icon" id="btn-graph-snapshots"><i class="fas fa-rotate-right"></i> Actualiser</button>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>#</th><th>Domaine</th><th>Origine</th><th>Date</th><th>Changements</th><th>Résumé</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="graph-snapshots-tbody">
+                            <tr><td colspan="7" class="empty-state">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="graph-snapshot-detail"></div>
+            </div>
+
+            <div class="logs-card g7-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-satellite"></i> Surveillance planifiée (opt-in)</div>
+                    <div class="logs-filters">
+                        <input type="text" class="filter-input" id="monitor-domain" placeholder="Domaine à surveiller">
+                        <input type="number" class="filter-input g7-narrow" id="monitor-interval" min="1" max="365" value="7" title="Intervalle (jours)">
+                        <button class="btn-icon" id="btn-monitor-add"><i class="fas fa-plus"></i> Ajouter (désactivé)</button>
+                    </div>
+                </div>
+                <p class="g7-notice" id="monitor-notice">
+                    Rescan passif via le workflow n8n « recon-ia-rescan » (désactivé par défaut). Alerte mail à
+                    l'administrateur uniquement, sur changement significatif. Seuls les domaines ayant déjà fait
+                    l'objet d'un dossier vérifié et consenti peuvent être surveillés.
+                </p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Domaine</th><th>État</th><th>Intervalle</th><th>Dernier rescan</th><th>Dernier changement</th><th>Dernière alerte</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="monitor-tbody">
+                            <tr><td colspan="7" class="empty-state">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div><!-- /tab-graph -->
 
         <!-- ════ TAB TECHNIQUE ════ -->
         <div class="tab-panel" id="tab-tech">
@@ -1115,6 +1284,25 @@
         return r.json();
     }
 
+    async function apiPost(path) {
+        const r = await fetch(_apiBase + path, {
+            method: 'POST',
+            headers: { 'Authorization': 'Basic ' + _authHeader, 'Accept': 'application/json' }
+        });
+        if (r.status === 401) throw new Error('401');
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+        return body;
+    }
+
+    /* ── Coffre des résultats (code d'accès du demandeur) ─────── */
+    const VAULT_STATES = { active: 'Code actif', expired: 'Code expiré', revoked: 'Code révoqué', none: 'Aucun code émis' };
+    function vaultStateLabel(r) {
+        if (r.results_purged_at) return 'Contenu purgé (RGPD)';
+        const label = VAULT_STATES[r.access_state] || r.access_state || '—';
+        return `Chiffré — ${label} · ${r.access_count || 0} consultation(s)`;
+    }
+
     async function apiFetchBinary(path) {
         const r = await fetch(_apiBase + path, {
             headers: { 'Authorization': 'Basic ' + _authHeader }
@@ -1122,6 +1310,27 @@
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.blob();
     }
+
+    // Requête JSON avec corps (POST/PATCH/DELETE) — utilisée par la phase 7.
+    async function apiSend(method, path, body) {
+        const r = await fetch(_apiBase + path, {
+            method,
+            headers: { 'Authorization': 'Basic ' + _authHeader, 'Accept': 'application/json',
+                       'Content-Type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body)
+        });
+        if (r.status === 401) throw new Error('401');
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        return data;
+    }
+
+    // Helpers exposés au module externe web/dashboard-graph.js (phase 7) :
+    // des fonctions liées à la session, jamais l'en-tête d'authentification.
+    window.ReconDash = Object.freeze({
+        apiFetch, apiPost, apiSend, apiFetchBinary, formatDate,
+        onUnauthorized: () => logout(),
+    });
 
     /* ── RECON STATS ────────────────────────────────────────── */
     /**
@@ -1376,7 +1585,11 @@
                 // or le parseur redécode les entités AVANT que le JS ne soit
                 // évalué — une apostrophe dans le domaine s'échapperait de la
                 // chaîne. On passe par data-* + délégation d'évènement.
-                const pdfBtn   = r.has_pdf
+                // Dossier scellé (coffre des résultats) : le PDF n'est plus
+                // lisible côté serveur, seul le demandeur l'ouvre avec son code.
+                const pdfBtn   = r.results_sealed
+                    ? `<span title="${escHtml(vaultStateLabel(r))}" style="color:var(--cyan)"><i class="fas fa-lock"></i></span>`
+                    : r.has_pdf
                     ? `<button class="btn-action btn-dl" data-action="pdf" data-id="${r.id}" title="Télécharger PDF"><i class="fas fa-file-pdf"></i></button>`
                     : '<span style="color:var(--text-dim)">—</span>';
 
@@ -1460,10 +1673,125 @@
     }
     window.downloadExport = downloadExport;
 
+    /* ── SCANS BRUTS (cache) ────────────────────────────────── */
+    let _cachePage = 1;
+    let _modalCacheId = null;
+
+    async function loadCache(page) {
+        _cachePage = page || 1;
+        const tbody = document.getElementById('cache-tbody');
+        const params = new URLSearchParams({ page: _cachePage, per_page: 20 });
+        const domain = document.getElementById('filter-cache-domain').value.trim();
+        const valid  = document.getElementById('filter-cache-valid').value;
+        if (domain) params.set('domain', domain);
+        if (valid)  params.set('valid', valid);
+        try {
+            const resp = await apiFetch('/cache?' + params.toString());
+            const items = resp.data || [];
+            document.getElementById('cache-count').textContent = `${resp.total} scan(s)`;
+            document.getElementById('cache-page-info').textContent = `${resp.page} / ${Math.max(resp.pages, 1)}`;
+            document.getElementById('btn-cache-prev').disabled = resp.page <= 1;
+            document.getElementById('btn-cache-next').disabled = resp.page >= resp.pages;
+            if (!items.length) {
+                tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fas fa-inbox"></i> Aucun scan en cache</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = items.map(c => {
+                const tools = (c.tools_key || '').split(',').filter(Boolean).length;
+                const state = c.is_valid
+                    ? `<span style="color:var(--green)">valide (${c.remaining_days} j)</span>`
+                    : '<span style="color:var(--text-dim)">expirée</span>';
+                return `<tr>
+                    <td style="color:var(--text-dim)">${c.id}</td>
+                    <td><span class="domain-link" style="color:var(--cyan);font-family:'Fira Code',monospace;cursor:pointer;text-decoration:underline dotted"
+                              data-action="cache-open" data-id="${c.id}">${escHtml(c.domain)}</span></td>
+                    <td>${tools}</td>
+                    <td>${c.subdomain_count ?? '—'}</td>
+                    <td>${fmtDuration(c.scan_duration_s)}</td>
+                    <td>${formatDate(c.updated_at)}</td>
+                    <td>${formatDate(c.expires_at)}</td>
+                    <td>${state}</td>
+                    <td>${c.hit_count}</td>
+                    <td>
+                        <button class="btn-action btn-eye" data-action="cache-open" data-id="${c.id}" title="Voir les données brutes"><i class="fas fa-eye"></i></button>
+                        <button class="btn-action btn-dl" data-action="cache-json" data-id="${c.id}" title="Télécharger le JSON brut"><i class="fas fa-file-code"></i></button>
+                    </td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            if (err.message === '401') { logout(); return; }
+            tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fas fa-circle-exclamation"></i> Erreur de chargement</td></tr>`;
+        }
+    }
+
+    async function downloadCacheJson(id) {
+        try {
+            const blob = await apiFetchBinary(`/cache/${id}/export.json`);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recon_ia_scan_brut_${id}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert('Erreur téléchargement JSON : ' + err.message);
+        }
+    }
+
+    function setModalFooter(mode) {
+        // mode : 'recon' (exports du dossier), 'sealed' (aucun export lisible),
+        // 'cache' (JSON brut uniquement)
+        document.getElementById('modal-btn-json').style.display = mode === 'sealed' ? 'none' : 'flex';
+        document.getElementById('modal-btn-csv').style.display  = mode === 'recon' ? 'flex' : 'none';
+        if (mode !== 'recon') document.getElementById('modal-btn-dl').style.display = 'none';
+    }
+
+    async function openCacheEntry(id) {
+        _modalReconId = null;
+        _modalCacheId = id;
+        document.getElementById('modal-title').textContent = `Scan brut #${id}`;
+        document.getElementById('modal-subtitle').textContent = 'Chargement…';
+        document.getElementById('modal-body').innerHTML = `<div class="empty-state"><span class="loading-spinner"></span> Chargement…</div>`;
+        setModalFooter('cache');
+        document.getElementById('modal-overlay').classList.add('open');
+        document.body.style.overflow = 'hidden';
+        try {
+            const resp = await apiFetch(`/cache/${id}`);
+            const c = resp.data;
+            const tools = extractTools(c.result);
+            document.getElementById('modal-title').textContent = c.domain;
+            document.getElementById('modal-subtitle').textContent =
+                `Scan brut en cache #${c.id} · mis à jour ${formatDate(c.updated_at)} · ${c.is_valid ? 'valide' : 'expiré'}`;
+            updateMethodologyBanner(tools);
+            document.getElementById('modal-body').innerHTML = `<div class="modal-section">
+                <div class="modal-section-title"><i class="fas fa-database"></i> Cache</div>
+                <div class="modal-grid2">
+                    <div class="info-item"><div class="info-label">Outils</div><div class="info-value">${tools.length}</div></div>
+                    <div class="info-item"><div class="info-label">Sous-domaines</div><div class="info-value">${c.subdomain_count ?? '—'}</div></div>
+                    <div class="info-item"><div class="info-label">Durée du scan</div><div class="info-value">${fmtDuration(c.scan_duration_s)}</div></div>
+                    <div class="info-item"><div class="info-label">Expire</div><div class="info-value">${formatDate(c.expires_at)}</div></div>
+                    <div class="info-item"><div class="info-label">Réutilisations</div><div class="info-value">${c.hit_count}</div></div>
+                    <div class="info-item"><div class="info-label">Créé</div><div class="info-value">${formatDate(c.created_at)}</div></div>
+                </div>
+                ${c.corrupted ? '<p style="color:var(--red)">Résultat stocké illisible (JSON corrompu).</p>' : ''}
+                <p style="color:var(--text-dim);font-size:0.85rem;margin-top:0.75rem">
+                    Données publiques de reconnaissance passive, conservées en clair : aucune analyse IA, aucune donnée du demandeur.
+                </p>
+            </div>` + renderRawTools(tools);
+        } catch (err) {
+            document.getElementById('modal-body').innerHTML =
+                `<div class="empty-state"><i class="fas fa-circle-exclamation"></i> ${escHtml(err.message)}</div>`;
+        }
+    }
+
     /* ── DETAIL MODAL ───────────────────────────────────────── */
     window.openModal = async function openModal(id) {
         _modalReconId = id;
+        _modalCacheId = null;
         _modalDomain  = null;
+        setModalFooter('recon');
         document.getElementById('modal-title').textContent = `Recon #${id}`;
         document.getElementById('modal-subtitle').textContent = 'Chargement…';
         document.getElementById('modal-body').innerHTML = `<div class="empty-state"><span class="loading-spinner"></span> Chargement du rapport…</div>`;
@@ -1502,6 +1830,9 @@
         document.getElementById('modal-subtitle').textContent =
             `#${d.id} · ${reconStatusBadge(d.status).replace(/<[^>]+>/g,'')} · Créé ${formatDate(d.created_at)}`;
         document.getElementById('modal-btn-dl').style.display = d.has_pdf ? 'flex' : 'none';
+        // Dossier scellé : les exports admin répondent 403, on ne les propose pas
+        setModalFooter(d.results_sealed ? 'sealed' : 'recon');
+        if (!d.results_sealed) document.getElementById('modal-btn-dl').style.display = d.has_pdf ? 'flex' : 'none';
 
         let html = '';
 
@@ -1520,13 +1851,44 @@
             </div>
         </div>`;
 
+        /* ── Coffre des résultats ──
+           Une fois scellé, le contenu (scan, analyse, rapport, PDF) n'est
+           lisible qu'avec le code envoyé au demandeur : seules ces
+           métadonnées restent visibles côté admin. */
+        if (d.results_sealed) {
+            const canRevoke = d.access_state === 'active' && !d.results_purged_at;
+            html += `<div class="modal-section">
+                <div class="modal-section-title"><i class="fas fa-lock"></i> Coffre des résultats</div>
+                <div class="modal-grid2">
+                    <div class="info-item"><div class="info-label">État</div>
+                        <div class="info-value">${escHtml(vaultStateLabel(d))}</div></div>
+                    <div class="info-item"><div class="info-label">Code valable jusqu'au</div>
+                        <div class="info-value">${formatDate(d.access_expires_at)}</div></div>
+                    <div class="info-item"><div class="info-label">Dernière consultation</div>
+                        <div class="info-value">${d.last_access_at ? formatDate(d.last_access_at) : 'jamais'}</div></div>
+                    <div class="info-item"><div class="info-label">Scellé le</div>
+                        <div class="info-value">${formatDate(d.sealed_at)}</div></div>
+                </div>
+                <p style="color:var(--text-dim);font-size:0.85rem;margin-top:0.75rem">
+                    Contenu chiffré avec le code d'accès du demandeur : il n'est pas consultable depuis la console.
+                    Le score, les compteurs et les statuts d'outils ci-dessus restent disponibles.
+                </p>
+                <button class="btn-action" id="modal-cache-btn" style="width:auto;padding:0 0.9rem;margin-top:0.5rem"><i class="fas fa-database"></i>&nbsp;Voir le scan brut (cache)</button>
+                ${canRevoke ? `<button class="btn-action" id="modal-revoke-btn" data-id="${d.id}" style="width:auto;padding:0 0.9rem;margin-top:0.5rem"><i class="fas fa-ban"></i>&nbsp;Révoquer le code</button>` : ''}
+            </div>`;
+        }
+
         /* ── Timings ──
            Toutes les durées sont FIGÉES : elles se calculent depuis les
            horodatages persistés (fin - début), jamais depuis Date.now().
            « Total flux » grandissait auparavant à l'infini à chaque rafraîchissement. */
         const scanDur    = timingValue(d);
         const analysisDt = d.analysis_generated_at;
-        const scanEnd    = d.end_report_date || d.completed_at;
+        // Fin du SCAN = completed_at. end_report_date marque la fin de TOUT le
+        // flux (après l'analyse) : le prendre en premier donnait une durée
+        // d'analyse négative (constaté : « −238.5 s » sur un scan servi par le
+        // cache, 2026-10-19). Même correctif que routes/report.py::_compute_timing.
+        const scanEnd    = d.completed_at || d.end_report_date;
         const totalDur   = d.flow_duration_s != null
             ? d.flow_duration_s
             : diffSeconds(d.start_report_date, d.end_report_date);
@@ -1673,8 +2035,9 @@
         /* ── Données brutes par outil ── */
         html += renderRawTools(tools);
 
-        /* ── Aucune analyse ── */
-        if (!analysis && !final) {
+        /* ── Aucune analyse ── (sans objet pour un dossier scellé : le contenu
+           existe, il est seulement chiffré — voir la section Coffre) */
+        if (!analysis && !final && !d.results_sealed) {
             html += `<div class="modal-section">
                 <div style="text-align:center;padding:2rem;color:var(--text-dim)">
                     <i class="fas fa-brain" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:var(--border)"></i>
@@ -1685,6 +2048,43 @@
         }
 
         document.getElementById('modal-body').innerHTML = html;
+
+        // Différentiel avec le scan précédent (phase 7, en clair : lisible
+        // même pour un dossier scellé) — section ajoutée par dashboard-graph.js
+        if (window.ReconGraph) window.ReconGraph.renderReconDiff(d.id, document.getElementById('modal-body'));
+
+        // Dossier scellé : ses données brutes restent consultables via le
+        // cache du même domaine (le plus récent).
+        const cacheBtn = document.getElementById('modal-cache-btn');
+        if (cacheBtn) {
+            cacheBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await apiFetch('/cache?per_page=100&domain=' + encodeURIComponent(d.domain));
+                    const match = (resp.data || []).find(c => c.domain === d.domain);
+                    if (match) openCacheEntry(match.id);
+                    else alert('Aucun scan en cache pour ce domaine.');
+                } catch (err) {
+                    alert('Cache indisponible : ' + err.message);
+                }
+            });
+        }
+
+        const revokeBtn = document.getElementById('modal-revoke-btn');
+        if (revokeBtn) {
+            revokeBtn.addEventListener('click', async () => {
+                if (!confirm('Révoquer le code d\'accès ? Le demandeur ne pourra plus ouvrir son rapport, et le contenu chiffré deviendra définitivement illisible.')) return;
+                revokeBtn.disabled = true;
+                try {
+                    await apiPost(`/recon/${d.id}/revoke_access`);
+                    const resp = await apiFetch(`/recon/${d.id}/report`);
+                    if (resp.success && resp.data) renderModal(resp.data);
+                    loadReports(_currentPage);
+                } catch (err) {
+                    alert('Révocation impossible : ' + err.message);
+                    revokeBtn.disabled = false;
+                }
+            });
+        }
     }
 
     /* ── TRAÇABILITÉ OUTILS (données produites en phase 2) ──── */
@@ -1904,6 +2304,7 @@
         document.getElementById('modal-overlay').classList.remove('open');
         document.body.style.overflow = '';
         _modalReconId = null;
+        _modalCacheId = null;
         _modalDomain  = null;
         // Le bandeau décrit les outils de la recon consultée — on repasse au
         // libellé générique pour ne pas laisser une info hors contexte.
@@ -1916,7 +2317,20 @@
         if (_modalReconId) downloadPdf(_modalReconId, _modalDomain || 'domain');
     });
     document.getElementById('modal-btn-json').addEventListener('click', () => {
-        if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'json');
+        if (_modalCacheId) downloadCacheJson(_modalCacheId);
+        else if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'json');
+    });
+    document.getElementById('btn-apply-cache-filters').addEventListener('click', () => loadCache(1));
+    document.getElementById('filter-cache-domain').addEventListener('keydown', e => { if (e.key === 'Enter') loadCache(1); });
+    document.getElementById('btn-cache-prev').addEventListener('click', () => loadCache(_cachePage - 1));
+    document.getElementById('btn-cache-next').addEventListener('click', () => loadCache(_cachePage + 1));
+    document.getElementById('cache-tbody').addEventListener('click', e => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if (!Number.isInteger(id)) return;
+        if (btn.dataset.action === 'cache-open') openCacheEntry(id);
+        else if (btn.dataset.action === 'cache-json') downloadCacheJson(id);
     });
     document.getElementById('modal-btn-csv').addEventListener('click', () => {
         if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'csv');
@@ -2117,6 +2531,7 @@
         if (_chartEndpoints) { _chartEndpoints.destroy(); _chartEndpoints = null; }
         if (_chartToolsReliability) { _chartToolsReliability.destroy(); _chartToolsReliability = null; }
         if (_chartMitre)            { _chartMitre.destroy();            _chartMitre = null; }
+        if (window.ReconGraph) window.ReconGraph.reset();
         document.getElementById('dashboard').style.display   = 'none';
         document.getElementById('login-screen').style.display = 'flex';
         document.getElementById('login-form').reset();
@@ -2130,6 +2545,8 @@
             document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById('tab-' + target).classList.add('active');
+            if (target === 'cache') loadCache(_cachePage);
+            if (target === 'graph' && window.ReconGraph) window.ReconGraph.open();
             if (target === 'tech') {
                 if (_chartStatus)    _chartStatus.resize();
                 if (_chartEndpoints) _chartEndpoints.resize();
@@ -2173,5 +2590,6 @@
 
 })();
 </script>
+<script src="dashboard-graph.js"></script>
 </body>
 </html>

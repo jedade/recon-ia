@@ -11,12 +11,10 @@
         font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:;
         img-src 'self' data: https:;
         connect-src 'self';
-        frame-ancestors 'none';
         base-uri 'self';
         form-action 'self';
     ">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <meta http-equiv="X-Frame-Options" content="DENY">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
     <style>
@@ -1003,6 +1001,7 @@
         </div>
 
         <p style="color:var(--muted2); margin-bottom:1rem;">Les endpoints sensibles requièrent une authentification <strong>HTTP Basic Auth</strong> (Base64 de <code>email:mot_de_passe</code>). Un endpoint <code>POST /auth/login</code> permet de valider les credentials avant d'effectuer des appels.</p>
+        <p style="color:var(--muted2); margin-bottom:1rem;">Exceptions : les routes du parcours public (<code>POST /recon</code>, <code>POST /verify_email</code>, <code>POST /results/access</code>) sont ouvertes ; les routes <code>GET /results/*</code> utilisent une session obtenue avec le code d'accès (<code>Authorization: Bearer &lt;session_token&gt;</code>) ; les routes du pipeline acceptent aussi le jeton de service interne de n8n (<code>X-Service-Token</code>), qui n'est jamais accepté depuis Internet.</p>
 
         <div class="callout callout-warn">
             <i class="fas fa-triangle-exclamation" style="color:var(--warning)"></i>
@@ -1188,7 +1187,7 @@ curl -u <span class="hl-str">"admin@example.com:monmotdepasse"</span> \
                 <i class="fas fa-chevron-down ep-chevron"></i>
             </div>
             <div class="endpoint-body">
-                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Active l'enregistrement de reconnaissance en validant le code OTP à 6 chiffres reçu par email.</p>
+                <p style="color:var(--muted2); margin-top:1rem; font-size:0.88rem;">Route <strong>publique</strong>. Valide le code OTP à 6 chiffres reçu par email (5 essais maximum par code), active l'enregistrement et <strong>lance l'analyse</strong> : la réponse contient <code>pipeline_started</code>.</p>
 
                 <p class="ep-section-title">Corps de la requête</p>
                 <table class="params-table">
@@ -2283,56 +2282,56 @@ curl -u <span class="hl-str">"admin@example.com:motdepasse"</span> https://api.i
                 <div class="step-num">2</div>
                 <div class="step-content">
                     <h4>Vérification email</h4>
-                    <p>L'utilisateur valide son email via <code>POST /verify_email</code> avec le code OTP. L'enregistrement passe en statut <code>pending</code>.</p>
+                    <p>L'utilisateur valide son email via <code>POST /verify_email</code> (route publique) avec le code OTP — 5 essais maximum par code. L'API déclenche alors elle-même le pipeline.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">3</div>
                 <div class="step-content">
                     <h4>Déclenchement n8n</h4>
-                    <p>Un webhook n8n est déclenché automatiquement. n8n appelle <code>POST /pass_recon</code> avec le domaine pour lancer l'analyse OSINT.</p>
+                    <p>L'API appelle le webhook n8n sur le réseau interne (en-tête secret <code>X-Pipeline-Secret</code>) ; n8n n'est jamais exposé sur Internet. n8n rappelle ensuite l'API avec son jeton de service (<code>X-Service-Token</code>), en commençant par <code>POST /pass_recon</code>.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">4</div>
                 <div class="step-content">
                     <h4>Analyse OSINT</h4>
-                    <p>Plus de 20 outils OSINT s'exécutent en parallèle (DNS, SSL, sous-domaines, HTTP, email, WHOIS). Les résultats sont mis en cache 24h.</p>
+                    <p>47 outils OSINT passifs s'exécutent en deux vagues parallèles (WHOIS/RDAP, DNS, certificats, sous-domaines, HTTP, email, réputation, archives). Les résultats sont mis en cache 30 jours.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">5</div>
                 <div class="step-content">
-                    <h4>Analyse IA duale</h4>
-                    <p>n8n appelle <code>POST /analyze</code> avec le JSON de <code>/pass_recon</code> et le <code>recon_id</code>. <strong>Groq</strong> et <strong>OpenRouter</strong> s'exécutent en parallèle : Groq identifie les CVE et vecteurs d'attaque, OpenRouter audite toutes les sections et documente les bonnes pratiques. Les deux rapports sont fusionnés automatiquement. Le résultat est mis en cache en BD — les appels suivants sont instantanés tant que le cache n'a pas expiré (<code>ANALYSIS_CACHE_TTL_HOURS</code>, défaut 7 jours).</p>
+                    <h4>Analyse IA</h4>
+                    <p>n8n appelle <code>POST /analyze/async</code> puis <code>/analyze/wait/&lt;id&gt;</code>. Les backends IA sont essayés en cascade (Gemini, Cerebras, Groq, OpenRouter, puis Ollama local en dernier recours). Chaque constat cite l'outil source (<code>source_tool</code>) ; le score et les techniques MITRE ATT&amp;CK sont calculés de façon déterministe. Le résultat est mis en cache en BD (<code>ANALYSIS_CACHE_TTL_HOURS</code>, défaut 7 jours).</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">6</div>
                 <div class="step-content">
-                    <h4>Persistance des résultats</h4>
-                    <p>n8n appelle <code>PATCH /recon/&lt;id&gt;/result</code> pour enregistrer les résultats OSINT bruts et le rapport IA en base de données.</p>
+                    <h4>Persistance</h4>
+                    <p>Les résultats OSINT et l'analyse sont enregistrés en base par les routes elles-mêmes (<code>pass_recon</code>, <code>analyze</code>) : aucune étape séparée.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">7</div>
                 <div class="step-content">
                     <h4>Rapport final narratif IA</h4>
-                    <p>n8n appelle <code>POST /recon/&lt;id&gt;/generate_final_report</code>. L'IA (Groq par défaut) condense les données OSINT + l'analyse en un rapport narratif structuré (résumé exécutif, vue infrastructure, narration des findings, recommandations priorisées). Stocké dans <code>recon.final_report</code>. Mis en cache — les appels suivants sont instantanés (<code>"cached": true</code>).</p>
+                    <p>n8n appelle <code>POST /recon/&lt;id&gt;/generate_final_report</code>. L'IA condense les données OSINT + l'analyse en un rapport narratif structuré (résumé exécutif, vue infrastructure, narration des findings, recommandations priorisées). Stocké dans <code>recon.final_report</code>. Mis en cache — les appels suivants sont instantanés (<code>"cached": true</code>).</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">8</div>
                 <div class="step-content">
                     <h4>Génération du rapport PDF</h4>
-                    <p>n8n appelle <code>POST /recon/&lt;id&gt;/generate_report</code>. L'analyse est chargée automatiquement depuis la BD (<code>analysis_result</code>). Si <code>final_report</code> existe, son executive summary enrichit le PDF. Le PDF est enregistré en base (<code>pdf_report BYTEA</code>) et envoyé par email.</p>
+                    <p>n8n appelle <code>POST /recon/&lt;id&gt;/generate_report</code>. L'analyse est chargée automatiquement depuis la BD (<code>analysis_result</code>). Si <code>final_report</code> existe, son executive summary enrichit le PDF. Le PDF est généré, puis <strong>le dossier est chiffré</strong> (AES-256-GCM) avec une clé dérivée d'un code d'accès aléatoire. Ce code est envoyé au demandeur par email, <strong>sans pièce jointe</strong> ; le serveur ne le conserve pas.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">9</div>
                 <div class="step-content">
-                    <h4>Téléchargement</h4>
-                    <p>Le rapport PDF est consultable à tout moment via <code>GET /recon/&lt;id&gt;/report.pdf</code> (authentifié). Il est stocké en base de données (<code>pdf_report BYTEA</code>).</p>
+                    <h4>Consultation par code</h4>
+                    <p>Le demandeur saisit son code sur la page <a href="result.html">Voir le résultat</a> : <code>POST /results/access</code> ouvre une session d'une heure, puis <code>GET /results/report</code>, <code>/results/report.pdf</code>, <code>/results/export.json</code>, <code>/results/export.csv</code> et <code>/results/export.navigator.json</code> (layer ATT&amp;CK Navigator) servent le rapport déchiffré. Le code est valable 30 jours et révocable.</p>
                 </div>
             </div>
         </div>

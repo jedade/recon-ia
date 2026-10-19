@@ -30,6 +30,15 @@ sémantique) :
   3. Recherche web : combien de recherches ont été effectuées et quelle
      proportion des findings cite au moins une source web (`web_sources`).
 
+Phase 3 (B7) : le RAG interroge désormais une requête par constat, et les
+extraits portent `topic`/`collection`. La mesure `rag_snippets_used` reste
+la même (citation du nom de la source dans une recommandation) ; les
+compteurs `rag_queries`, `rag_filtered_by_collection` et
+`findings_with_rag_references` sont ajoutés par routes/analyze.py.
+Les findings ajoutés par une règle déterministe (`generated_by: "rule"`)
+ne sont pas comptés comme « couverture par le modèle » — sinon le contrôle
+mesurerait le serveur, plus le LLM.
+
 `strengths` n'a pas de champ `source_tool` structuré dans le schéma — le
 prompt (instruction #2) demande donc au modèle de citer la clé de l'outil
 entre parenthèses dans le texte (ex: "SPF correctement configuré
@@ -130,7 +139,9 @@ def compute_coverage_check(
     `grounding_check.py::compute_grounding_check`.
     """
     findings = report.get("findings") or []
-    findings = [f for f in findings if isinstance(f, dict)]
+    # Findings du modèle uniquement (voir docstring : les ajouts par règle
+    # déterministe ne mesurent pas la couverture du LLM).
+    findings = [f for f in findings if isinstance(f, dict) and f.get("generated_by") != "rule"]
     scan_results = scan_results if isinstance(scan_results, dict) else {}
     signals = signals if isinstance(signals, dict) else {}
 

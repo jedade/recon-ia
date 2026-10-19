@@ -7,24 +7,24 @@
     <!-- ============================================================ -->
     <!-- Sécurité : en-têtes de protection                           -->
     <!-- ============================================================ -->
-    <!-- connect-src autorise http: en plus des origines de prod — API_BASE/
-         WEBHOOK_BASE (voir config.js / CLAUDE.md) peuvent pointer vers un
-         backend local en clair (http://localhost:8080, http://localhost:5678)
-         pendant qu'on développe ; en prod, seules de vraies URLs https sont
-         configurées de toute façon. -->
+    <!-- connect-src autorise http: en plus des origines de prod — API_BASE
+         (voir config.js / CLAUDE.md) peut pointer vers un backend local en
+         clair (http://api.localhost) pendant qu'on développe ; en prod, seule
+         une vraie URL https est configurée. Le formulaire ne parle qu'à
+         l'API, jamais à n8n. challenges.cloudflare.com : widget Turnstile
+         (anti-robot du formulaire, script + iframe). -->
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
-        script-src 'self' 'unsafe-inline';
+        script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com;
+        frame-src https://challenges.cloudflare.com;
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com;
         font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:;
         img-src 'self' data: https:;
         connect-src 'self' http: https:;
-        frame-ancestors 'none';
         base-uri 'self';
         form-action 'self';
     ">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <meta http-equiv="X-Frame-Options" content="DENY">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <!-- Ressources externes — crossorigin pour isolation CORS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
@@ -2293,6 +2293,7 @@
                         <a href="#coming-soon">À venir</a>
                         <a href="#faq">FAQS</a>
                         <a href="docs.html" style="color:#00d4ff!important;font-family:'Fira Code',monospace;font-size:0.85rem"><i class="fas fa-book" style="margin-right:4px"></i>Docs</a>
+                        <a href="result.html" style="color:#9fef00!important;font-family:'Fira Code',monospace;font-size:0.85rem"><i class="fas fa-key" style="margin-right:4px"></i>Voir le résultat</a>
                         <!-- Bouton "Commencer gratuitement" distinct -->
                         <a href="#report" class="btn-free-trial">Commencer gratuitement</a>
                     </nav>
@@ -2330,6 +2331,7 @@
                     <a href="#coming-soon">À venir</a>
                     <a href="#faq">FAQS</a>
                     <a href="docs.html" style="color:#00d4ff!important;font-family:'Fira Code',monospace;font-size:0.85rem"><i class="fas fa-book" style="margin-right:4px"></i>Docs</a>
+                        <a href="result.html" style="color:#9fef00!important;font-family:'Fira Code',monospace;font-size:0.85rem"><i class="fas fa-key" style="margin-right:4px"></i>Voir le résultat</a>
                     <a href="dashboard.html" style="color:#00d4ff!important;font-family:'Fira Code',monospace;font-size:0.85rem"><i class="fas fa-chart-line" style="margin-right:4px"></i>Admin</a>
                 </nav>
                 
@@ -2675,6 +2677,9 @@
                         <strong>Important :</strong> Cette validation est requise pour des raisons légales et éthiques. Seuls les propriétaires légitimes ou leurs représentants autorisés peuvent demander la surveillance de domaines.
                     </div>
                 </div>
+                <!-- Anti-robot Cloudflare Turnstile : affiché seulement si
+                     TURNSTILE_SITE_KEY est configurée (config.js). -->
+                <div id="turnstile-widget" style="display:flex;justify-content:center;margin-top:1.5rem;"></div>
                 <div style="text-align: center; margin-top: 2rem;">
                     <button type="submit" class="btn" id="submit-main-btn">
                         <span class="btn-text">
@@ -2910,20 +2915,47 @@
     <script src="config.js"></script>
     <script>
         // ============================================================
-        // Configuration — URLs n8n/API
-        // ⚠️  Ces URLs sont visibles côté client : ne jamais y mettre
-        //     de secrets. La protection anti-abus est côté n8n/API.
+        // Configuration — URL de l'API
+        // ⚠️  Visible côté client : ne jamais y mettre de secrets. La
+        //     protection anti-abus est côté API (captcha, limites, OTP).
         //
-        // Configurables via DASHBOARD_API_BASE / WEBHOOK_BASE_URL (.env
-        // racine), injectées dans config.js au démarrage du conteneur `web`
-        // (voir docker-compose.yml, CLAUDE.md §5/§7) — repli sur les URLs de
-        // prod codées en dur si config.js est absent/vide (chaîne vide →
-        // falsy en JS).
+        // Le formulaire ne parle QU'À L'API (plan d'action, phase 1) : la
+        // vérification du code déclenche elle-même le pipeline n8n sur le
+        // réseau interne. Configurable via DASHBOARD_API_BASE (.env racine),
+        // injectée dans config.js au démarrage du conteneur `web` — repli
+        // sur l'URL de prod si config.js est absent/vide.
         // ============================================================
-        const RECON_API_URL    =
-            ((window.RECON_IA_CONFIG && window.RECON_IA_CONFIG.API_BASE) || 'https://api.idachallenge.bj') + '/recon';
-        const VERIFY_API_URL   =
-            (window.RECON_IA_CONFIG && window.RECON_IA_CONFIG.WEBHOOK_BASE) || 'https://n8n.idachallenge.bj/webhook/dfb160f6-daa7-4d3f-bd33-09f4a6797c65';
+        const _CONFIG = window.RECON_IA_CONFIG || {};
+        const API_BASE = _CONFIG.API_BASE || 'https://api.idachallenge.bj';
+        const RECON_API_URL  = API_BASE + '/recon';
+        const VERIFY_API_URL = API_BASE + '/verify_email';
+        const TURNSTILE_SITE_KEY = _CONFIG.TURNSTILE_SITE_KEY || '';
+
+        // ── Cloudflare Turnstile (anti-robot) ───────────────────────
+        // Chargé à la demande, uniquement si une clé de site est configurée.
+        let _turnstileToken = '';
+        let _turnstileWidgetId = null;
+        function setupTurnstile() {
+            if (!TURNSTILE_SITE_KEY) return;
+            window.onTurnstileLoad = function () {
+                _turnstileWidgetId = window.turnstile.render('#turnstile-widget', {
+                    sitekey: TURNSTILE_SITE_KEY,
+                    language: 'fr',
+                    callback: function (token) { _turnstileToken = token; },
+                    'expired-callback': function () { _turnstileToken = ''; },
+                    'error-callback': function () { _turnstileToken = ''; },
+                });
+            };
+            const s = document.createElement('script');
+            s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad';
+            s.async = true;
+            s.defer = true;
+            document.head.appendChild(s);
+        }
+        function resetTurnstile() {
+            _turnstileToken = '';
+            if (window.turnstile && _turnstileWidgetId !== null) window.turnstile.reset(_turnstileWidgetId);
+        }
 
         // Rate-limiting côté client : 30 s entre deux soumissions
         let _submitCooldownUntil = 0;
@@ -3113,7 +3145,8 @@
                 lastname:  formData.get('last-name'),
                 domain:    formData.get('domain-to-test'),
                 email:     formData.get('contact-email'),
-                accord:    formData.get('ownership-confirmation') === 'on'
+                accord:    formData.get('ownership-confirmation') === 'on',
+                turnstile_token: _turnstileToken || undefined
             };
 
             const response = await fetch(RECON_API_URL, {
@@ -3125,26 +3158,22 @@
             return await handleFetchResponse(response);
         }
 
-        // Fonction pour vérifier le code via /verify_email (Étape 2)
+        // Étape 2 — Vérifier le code via l'API (POST /verify_email), qui lance
+        // l'analyse elle-même. Réponse : objet JSON, statut HTTP significatif
+        // (200 = vérifié, 400/404/429 = refusé avec un message explicite).
         async function verifyCode(code, email) {
-            const payload = { code, email };
             const response = await fetch(VERIFY_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ code, email })
             });
-
-            const result = await handleFetchResponse(response);
-
-            // Le webhook n8n répond avec `respondWith: allIncomingItems` : le corps
-            // est TOUJOURS un tableau (même à un seul élément), jamais un objet nu.
-            // Le statut HTTP du webhook est 200 dans tous les cas où le workflow
-            // s'exécute sans planter (y compris pour un code OTP invalide, depuis
-            // que le nœud "Verify email" a `neverError: true` pour ne plus avaler
-            // la réponse d'erreur de l'API) — il ne reflète PAS le succès réel de
-            // la vérification. Seul le champ `success` du payload fait foi.
-            const item = Array.isArray(result) ? result[0] : result;
-            return { ok: item?.success === true, message: item?.error || null };
+            let result = null;
+            try { result = await response.json(); } catch (e) { /* corps non JSON */ }
+            return {
+                ok: response.ok && result?.success === true,
+                pipelineStarted: result?.pipeline_started === true,
+                message: result?.error || result?.message || null,
+            };
         }
         // Nouvelle gestion du formulaire en deux étapes
         function setupReportForm() {
@@ -3223,15 +3252,14 @@
                         'success'
                     );
                 } catch (error) {
-                    // Ne pas exposer error.message (données serveur) — message générique
+                    // Les messages de l'API sont rédigés pour l'utilisateur
+                    // (consentement, anti-robot, délai entre deux codes) ;
+                    // showMessage les insère en texte brut (textContent).
                     console.error('Erreur lors de l\'envoi:', error);
                     _submitCooldownUntil = 0; // Réinitialiser le cooldown en cas d'erreur
-                    showMessage(
-                        '<i class="fas fa-exclamation-circle" style="margin-right: 8px;"></i> ' +
-                        'Une erreur est survenue. Veuillez réessayer.',
-                        'error'
-                    );
+                    showMessage(error?.message || 'Une erreur est survenue. Veuillez réessayer.', 'error');
                 } finally {
+                    resetTurnstile(); // un jeton Turnstile n'est valable qu'une fois
                     btnText.style.display = 'inline-flex';
                     btnLoading.style.display = 'none';
                     submitMainBtn.disabled = false;
@@ -3270,7 +3298,12 @@
                     // Vérifier le code avec le serveur
                     const verifyResult = await verifyCode(code, email);
 
-                    if (verifyResult.ok) {
+                    if (verifyResult.ok && !verifyResult.pipelineStarted) {
+                        verificationForm.style.display = 'none';
+                        showMessage(verifyResult.message ||
+                            "Email vérifié, mais l'analyse n'a pas pu être lancée. L'équipe a été prévenue.",
+                            'error', true);
+                    } else if (verifyResult.ok) {
                         // Cacher le formulaire de vérification
                         verificationForm.style.display = 'none';
 
@@ -3279,9 +3312,12 @@
                             '<div style="display: flex; align-items: center; gap: 10px;">' +
                             '  <i class="fas fa-check-circle" style="font-size: 24px; color: #10b981;"></i>' +
                             '  <div>' +
-                            '    <h3 style="margin: 0 0 5px 0; color: #1e40af;">Demande soumise avec succès !</h3>' +
+                            '    <h3 style="margin: 0 0 5px 0; color: #1e40af;">Analyse lancée !</h3>' +
                             '    <p style="margin: 0; line-height: 1.5;">' +
-                            '      Vos informations ont bien été récupérées. Le rapport sera envoyé par email dans les 30 minutes.' +
+                            '      Dès que le rapport sera prêt (en général moins de 30 minutes), vous recevrez un email ' +
+                            '      contenant un <strong>code d\'accès</strong>. Saisissez-le sur la page ' +
+                            '      <a href="result.html" style="color:#1e40af;font-weight:600;">Voir le résultat</a> ' +
+                            '      pour consulter et télécharger le rapport (PDF, JSON, CSV).' +
                             '    </p>' +
                             '  </div>' +
                             '</div>',
@@ -3614,6 +3650,7 @@
                 setupCheckboxes();
                 setupFAQ();
                 setupReportForm();
+                setupTurnstile();
                 setupComingSoonCarousel();
                 setupStickyHeader();
                 setupBackToTop();

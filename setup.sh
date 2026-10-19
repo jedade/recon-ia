@@ -46,6 +46,18 @@ log()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$1"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$1"; }
 warn() { printf '  \033[1;33m!\033[0m %s\n' "$1"; }
 
+# Secret aléatoire de 64 caractères hexadécimaux (256 bits)
+gen_secret() { openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+
+# Ajoute NOM=valeur au .env racine si NOM n'y figure pas encore (mise à niveau
+# d'une installation existante sans jamais écraser une valeur déjà présente).
+ensure_root_var() {
+    if ! grep -q "^$1=" .env 2>/dev/null; then
+        printf '%s=%s\n' "$1" "$2" >> .env
+        ok "$1 ajoutée au .env racine"
+    fi
+}
+
 # ─────────────────────────────────────────────────────────────────────────
 log "1/6 — Vérification des prérequis"
 # ─────────────────────────────────────────────────────────────────────────
@@ -77,7 +89,6 @@ REDIS_URL=redis://redis:6379/0
 ADMIN_DOMAIN=initial.idachallenge.bj
 ADMIN_EMAIL=${DEV_ADMIN_EMAIL}
 ADMIN_PASSWORD=${DEV_ADMIN_PASSWORD_HASH}
-ADMIN_PASSWORD_PLAIN=${DEV_ADMIN_PASSWORD_PLAIN}
 
 SECRET_KEY=$(openssl rand -base64 32 2>/dev/null || head -c32 /dev/urandom | base64)
 
@@ -124,16 +135,38 @@ if [ -f .env ]; then
     ok ".env (racine) existe déjà — non modifié"
 else
     cat > .env <<EOF
-# Généré par setup.sh — UNIQUEMENT pour l'interpolation \${VAR} de docker-compose.yml.
+# Généré par setup.sh — interpolation \${VAR} de docker-compose.yml, et SEULE
+# source des secrets partagés entre l'API et n8n (voir CLAUDE.md §7).
 POSTGRES_USER=${DEV_POSTGRES_USER}
 POSTGRES_PASSWORD=${DEV_POSTGRES_PASSWORD}
 POSTGRES_DB=${DEV_POSTGRES_DB}
-DOMAIN_URL_API=http://api:8080
-ADMIN_EMAIL=${DEV_ADMIN_EMAIL}
-ADMIN_PASSWORD_PLAIN=${DEV_ADMIN_PASSWORD_PLAIN}
-DASHBOARD_API_BASE=http://localhost:8080
+
+# Adresses servies par Caddy (préfixe http:// = sans TLS, développement local).
+# En production : SITE_ADDRESS=recon.mondomaine.tld, API_ADDRESS=api.mondomaine.tld
+SITE_ADDRESS=http://localhost
+API_ADDRESS=http://api.localhost
+DASHBOARD_API_BASE=http://api.localhost
+RESULTS_PAGE_URL=http://localhost/result.html
+
+# Cloudflare Turnstile (vide = désactivé, développement uniquement)
+TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=
 EOF
     ok ".env (racine) généré"
+fi
+
+# Secrets générés aléatoirement, ajoutés aussi aux installations existantes.
+ensure_root_var PIPELINE_SERVICE_TOKEN "$(gen_secret)"
+ensure_root_var N8N_WEBHOOK_SECRET     "$(gen_secret)"
+ensure_root_var RESULTS_ACCESS_SECRET  "$(gen_secret)"
+ensure_root_var N8N_ENCRYPTION_KEY     "$(gen_secret)"
+ensure_root_var APP_DB_PASSWORD        "$(gen_secret)"
+ensure_root_var RAG_DB_PASSWORD        "$(gen_secret)"
+ensure_root_var SITE_ADDRESS           "http://localhost"
+ensure_root_var API_ADDRESS            "http://api.localhost"
+ensure_root_var RESULTS_PAGE_URL       "http://localhost/result.html"
+if grep -q "^ADMIN_PASSWORD_PLAIN=" .env api/.env 2>/dev/null; then
+    warn "ADMIN_PASSWORD_PLAIN n'est plus utilisé (n8n a désormais son propre jeton de service) — vous pouvez le retirer de .env et api/.env"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -174,17 +207,27 @@ if docker exec ollama ollama pull "${OLLAMA_MODEL_DEFAULT}"; then
 else
     warn "échec du téléchargement du modèle Ollama — relancez manuellement : docker exec ollama ollama pull ${OLLAMA_MODEL_DEFAULT}"
 fi
+# Modèle d'embeddings du RAG (ingestion n8n ET recherche dans utils/rag_retrieval.py) :
+# sans lui, /api/embeddings répond 404 et l'analyse tourne sans extraits de référence.
+if docker exec ollama ollama pull nomic-embed-text:v1.5; then
+    ok "modèle d'embeddings nomic-embed-text:v1.5 téléchargé — RAG opérationnel"
+else
+    warn "échec du téléchargement de nomic-embed-text:v1.5 — relancez : docker exec ollama ollama pull nomic-embed-text:v1.5"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────
 log "6/6 — Terminé"
 # ─────────────────────────────────────────────────────────────────────────
 cat <<EOF
 
-  Frontend public   http://localhost:5000/
-  Dashboard admin   http://localhost:5000/dashboard.html
-  API (Swagger)     http://localhost:8080/apidocs
-  API (ReDoc)       http://localhost:8080/redoc
-  n8n               http://localhost:5678/  (⚠ sans authentification, ne jamais exposer publiquement)
+  Frontend public   http://localhost/              (via Caddy)
+  Voir le résultat  http://localhost/result.html
+  Dashboard admin   http://localhost/dashboard.html
+  API               http://api.localhost/          (via Caddy)
+  API (Swagger)     http://localhost:8080/apidocs  (boucle locale uniquement)
+  n8n (éditeur)     http://localhost:5678/         (boucle locale uniquement — créez
+                    tout de suite le compte propriétaire ; sur un serveur, passez
+                    par un tunnel : ssh -L 5678:127.0.0.1:5678 serveur)
 
   Identifiants admin (dev local — à changer avant toute exposition publique) :
     email    : ${DEV_ADMIN_EMAIL}

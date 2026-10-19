@@ -1,0 +1,19 @@
+# api/Dockerfile.test
+# Image légère pour exécuter la suite pytest SANS la stack complète
+# (ni Postgres, ni Redis, ni Ollama, ni les outils OSINT CLI) : les tests
+# tournent sur SQLite en mémoire (tests/conftest.py) et simulent le réseau.
+#
+# Le code n'est PAS copié dans l'image : il est monté au lancement, ce qui
+# évite un rebuild à chaque modification. Rebuild nécessaire uniquement si
+# requirements.txt change. Usage : scripts/run-tests.sh
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
+
+CMD ["python", "-m", "pytest"]

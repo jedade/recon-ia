@@ -1,0 +1,20 @@
+{
+  "id": "security_txt",
+  "titre": "security.txt — contact pour signaler une vulnérabilité",
+  "categorie": "Web",
+  "outils": ["security_txt"],
+  "pourquoi": "Le fichier /.well-known/security.txt (RFC 9116) indique aux chercheurs en sécurité comment signaler une vulnérabilité : adresse de contact, politique de divulgation, langues acceptées, date d'expiration du fichier. C'est un geste simple qui montre l'existence d'un processus de gestion des signalements.",
+  "risque": "Sans point de contact clair, une personne qui découvre une faille ne sait pas à qui l'adresser : le signalement se perd, arrive tard, ou la faille finit publiée sans que l'organisation ait pu corriger. Un fichier expiré ou pointant vers une adresse abandonnée a le même effet.",
+  "comment_corriger": [
+    "Publier https://votre-domaine/.well-known/security.txt avec au minimum les champs Contact et Expires.",
+    "Utiliser une adresse dédiée et réellement suivie (securite@ ou un formulaire).",
+    "Ajouter Policy (politique de divulgation) et Preferred-Languages: fr, en.",
+    "Renouveler le champ Expires avant échéance (au plus un an)."
+  ],
+  "exemple": "Contact: mailto:securite@exemple.bj\nExpires: 2027-10-19T00:00:00Z\nPreferred-Languages: fr, en",
+  "references": [
+    {"titre": "RFC 9116 — security.txt", "url": "https://www.rfc-editor.org/rfc/rfc9116"},
+    {"titre": "securitytxt.org", "url": "https://securitytxt.org/"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

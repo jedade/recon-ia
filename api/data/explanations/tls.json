@@ -1,0 +1,23 @@
+{
+  "id": "tls",
+  "titre": "TLS — versions de protocole et suites cryptographiques",
+  "categorie": "TLS",
+  "outils": ["tls_config", "ssl_info"],
+  "pourquoi": "TLS chiffre et authentifie la connexion entre le visiteur et le serveur. Sa robustesse dépend des versions de protocole acceptées et des suites cryptographiques proposées. TLS 1.3 et TLS 1.2 avec des suites à confidentialité persistante (ECDHE) et chiffrement authentifié (AES-GCM, ChaCha20-Poly1305) sont aujourd'hui recommandés ; SSLv2, SSLv3, TLS 1.0 et TLS 1.1 sont obsolètes (RFC 8996).",
+  "risque": "Accepter d'anciennes versions ou des suites faibles (RC4, 3DES, CBC avec SHA-1, export, échange RSA sans confidentialité persistante) expose à des attaques connues (POODLE, BEAST, Sweet32, rétrogradation) et à un déchiffrement a posteriori du trafic enregistré si la clé privée est un jour compromise. Les audits de conformité (PCI DSS, référentiels nationaux) signalent systématiquement ces écarts.",
+  "comment_corriger": [
+    "Désactiver SSLv2, SSLv3, TLS 1.0 et TLS 1.1 sur tous les services exposés (web, messagerie, VPN).",
+    "Activer TLS 1.3 et conserver TLS 1.2 uniquement avec des suites ECDHE + AEAD.",
+    "S'appuyer sur le profil « intermediate » du générateur de configuration Mozilla (ou « modern » si tous les clients le permettent).",
+    "Utiliser des clés RSA d'au moins 2048 bits ou ECDSA P-256, et des paramètres Diffie-Hellman d'au moins 2048 bits.",
+    "Revérifier après chaque mise à jour du serveur, du répartiteur de charge ou du CDN."
+  ],
+  "exemple": "ssl_protocols TLSv1.2 TLSv1.3;  (nginx)",
+  "references": [
+    {"titre": "Mozilla — Server Side TLS / SSL Configuration Generator", "url": "https://ssl-config.mozilla.org/"},
+    {"titre": "RFC 8996 — Deprecating TLS 1.0 and TLS 1.1", "url": "https://www.rfc-editor.org/rfc/rfc8996"},
+    {"titre": "ANSSI — Recommandations de sécurité relatives à TLS", "url": "https://cyber.gouv.fr/publications/recommandations-de-securite-relatives-tls"},
+    {"titre": "CWE-327 — Use of a Broken or Risky Cryptographic Algorithm", "url": "https://cwe.mitre.org/data/definitions/327.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

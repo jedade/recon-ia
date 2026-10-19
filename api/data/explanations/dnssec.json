@@ -1,0 +1,21 @@
+{
+  "id": "dnssec",
+  "titre": "DNSSEC — signature des réponses DNS",
+  "categorie": "DNS",
+  "outils": ["dnssec", "dane_check"],
+  "pourquoi": "Le DNS traduit les noms en adresses IP, sans aucune garantie d'authenticité à l'origine. DNSSEC fait signer cryptographiquement les enregistrements de la zone (RRSIG, DNSKEY) et rattache ces clés à la zone parente (enregistrement DS), formant une chaîne de confiance jusqu'à la racine. Un résolveur validant peut ainsi rejeter une réponse falsifiée. DNSSEC est aussi le prérequis de DANE (épinglage de certificats dans le DNS).",
+  "risque": "Sans DNSSEC, un attaquant capable d'empoisonner un cache de résolveur ou d'intercepter les requêtes DNS peut rediriger les visiteurs et le courrier vers ses propres serveurs (pharming, détournement de MX). Une configuration partielle (clés publiées sans DS chez le registre, signatures expirées) n'apporte aucune protection, voire rend le domaine injoignable pour les résolveurs validants.",
+  "comment_corriger": [
+    "Activer la signature de zone chez l'hébergeur DNS (souvent une simple option).",
+    "Publier l'enregistrement DS auprès du bureau d'enregistrement (registrar) pour fermer la chaîne de confiance.",
+    "Utiliser un algorithme moderne (13 — ECDSA P-256 SHA-256) et automatiser le renouvellement des signatures.",
+    "Surveiller la validité de la chaîne (outils DNSViz, Zonemaster de l'AFNIC)."
+  ],
+  "references": [
+    {"titre": "RFC 4033 — DNS Security Introduction and Requirements", "url": "https://www.rfc-editor.org/rfc/rfc4033"},
+    {"titre": "ANSSI — Bonnes pratiques pour l'acquisition et l'exploitation de noms de domaine", "url": "https://cyber.gouv.fr/publications/bonnes-pratiques-pour-lacquisition-et-lexploitation-de-noms-de-domaine"},
+    {"titre": "CWE-350 — Reliance on Reverse DNS Resolution for a Security-Critical Action", "url": "https://cwe.mitre.org/data/definitions/350.html"},
+    {"titre": "CAPEC-142 — DNS Cache Poisoning", "url": "https://capec.mitre.org/data/definitions/142.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

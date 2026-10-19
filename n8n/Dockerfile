@@ -1,4 +1,8 @@
-FROM docker.n8n.io/n8nio/n8n
+# Image de base configurable (N8N_IMAGE dans le .env racine) : le registre
+# officiel docker.n8n.io peut répondre 429 (limite de débit, constaté le
+# 2026-10-19) — la même image est publiée sur Docker Hub sous `n8nio/n8n`.
+ARG N8N_IMAGE=docker.n8n.io/n8nio/n8n
+FROM ${N8N_IMAGE}
 
 USER root
 

@@ -4,6 +4,7 @@ Génération de rapports PDF OSINT — Recon IA.
 Design professionnel : logo vectoriel natif, gradient, typographie soignée.
 """
 import io
+import re
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -683,6 +684,47 @@ def _build_summary(story: list, analysis: dict) -> None:
                 story.append(Spacer(1, 0.3*cm))
 
 
+_CONFIDENCE_LABEL = {'high': 'élevée', 'medium': 'moyenne', 'low': 'faible'}
+_TECH_ID_RE = re.compile(r'^T\d{4}(?:\.\d{3})?$')
+_MIT_ID_RE = re.compile(r'^M\d{4}$')
+
+
+def _ref_label(ref) -> str:
+    """Référence d'un constat : chaîne (ancien format) ou {collection, source} (phase 3)."""
+    if isinstance(ref, str):
+        return ref
+    if isinstance(ref, dict):
+        src = ref.get('source') if isinstance(ref.get('source'), str) else ''
+        col = ref.get('collection') if isinstance(ref.get('collection'), str) else ''
+        return f'{src} ({col})' if src and col else src
+    return ''
+
+
+def _attack_items(items, regex) -> list:
+    """« <b>T1566</b> Phishing » pour chaque entrée {id, name} dont l'ID est valide."""
+    out = []
+    for it in items or []:
+        if isinstance(it, dict) and isinstance(it.get('id'), str) and regex.match(it['id']):
+            out.append(f"<b>{_safe(it['id'])}</b> {_safe(str(it.get('name') or '')[:120])}")
+    return out[:10]
+
+
+def _with_attack(analysis: dict) -> dict:
+    """
+    Copie de l'analyse dont les constats sont (ré)annotés par la table
+    déterministe (idempotent) + chaîne d'attaque. Un échec de l'annotation
+    n'empêche jamais la génération du PDF.
+    """
+    try:
+        from utils.attack_enablement import annotate_findings, build_attack_chain
+        from utils.mitre_attack import attack_version
+        findings = annotate_findings(analysis.get('findings') or [], {})
+        return {**analysis, 'findings': findings,
+                '_attack_chain': build_attack_chain(findings), '_attack_version': attack_version()}
+    except Exception:
+        return analysis
+
+
 def _build_findings(story: list, analysis: dict) -> None:
     findings = analysis.get('findings', []) or []
     if not findings:
@@ -705,7 +747,7 @@ def _build_findings(story: list, analysis: dict) -> None:
         desc  = _safe(f.get('description', ''))
         evid  = _safe(f.get('evidence', ''))
         reco  = _safe(f.get('recommendation', ''))
-        refs  = [_safe(r) for r in (f.get('references', []) or [])[:8]]
+        refs  = [_safe(r) for r in (_ref_label(x) for x in (f.get('references', []) or [])[:8]) if r]
         srcs  = [_safe(s) for s in (f.get('web_sources', []) or [])[:3]]
 
         sc_hex = _hex(sc)
@@ -756,6 +798,28 @@ def _build_findings(story: list, analysis: dict) -> None:
             body_rows.append([Paragraph(
                 f'<font color="{_hex(colors.HexColor("#10b981"))}"><b>Recommandation</b></font>',
                 S['label']), Paragraph(reco, S['body'])])
+        # Phase 3/4 : confiance, horodatage, techniques rendues possibles,
+        # mitigations (table déterministe utils/attack_enablement.py)
+        conf = _CONFIDENCE_LABEL.get(str(f.get('confidence') or '').lower())
+        observed = f.get('observed_at') if isinstance(f.get('observed_at'), str) else None
+        if conf or observed:
+            parts = []
+            if conf:
+                parts.append(f'Confiance : <b>{conf}</b>')
+            if observed:
+                parts.append(f'observé le {_safe(observed[:25])}')
+            body_rows.append([Paragraph('<b>Fiabilité</b>', S['label']),
+                               Paragraph('  ·  '.join(parts), S['small'])])
+        enabled = _attack_items(f.get('attack_enabled'), _TECH_ID_RE)
+        if enabled:
+            body_rows.append([Paragraph('<b>Rend possible</b>', S['label']),
+                               Paragraph('<br/>'.join(enabled), S['small'])])
+        mitig = _attack_items(f.get('mitigations'), _MIT_ID_RE)
+        if mitig:
+            advice = f.get('mitigation_advice') if isinstance(f.get('mitigation_advice'), str) else ''
+            body_rows.append([Paragraph('<b>Mitigations</b>', S['label']),
+                               Paragraph('<br/>'.join(mitig) + (f'<br/><i>{_safe(advice[:600])}</i>' if advice else ''),
+                                         S['small'])])
         if refs:
             body_rows.append([Paragraph('<b>Références</b>', S['label']),
                                Paragraph('  ·  '.join(refs), S['small'])])
@@ -905,6 +969,46 @@ def _build_mitre_attack(story: list, analysis: dict) -> None:
                 S['bullet'],
             ))
         story.append(Spacer(1, 0.3*cm))
+
+
+def _build_attack_chain(story: list, analysis: dict) -> None:
+    """Chaîne d'attaque plausible (phase 4) — structure déterministe
+    (utils/attack_enablement.py::build_attack_chain), pas une production du LLM."""
+    chain = analysis.get('_attack_chain') or []
+    if not chain:
+        return
+
+    story.extend(_section("Chaîne d'Attaque Plausible", '◆'))
+    story.append(Paragraph(
+        "Enchaînement que les constats rendent <b>possible</b> pour un attaquant, déduit d'une "
+        "table déterministe (référentiel MITRE ATT&amp;CK Enterprise "
+        f"v{_safe(analysis.get('_attack_version') or '?')}). Ce n'est pas une attaque observée.",
+        S['body_l'],
+    ))
+    story.append(Spacer(1, 0.3*cm))
+
+    hdr = [Paragraph(t, S['th']) for t in ['Étape', 'Tactique', 'Techniques', 'Constats']]
+    rows = [hdr]
+    for step in chain:
+        techs = _attack_items(step.get('techniques'), _TECH_ID_RE)
+        sev = str(step.get('max_severity') or 'INFO').upper()
+        sc = SEV_C.get(sev, C_MUTED)
+        rows.append([
+            Paragraph(f"<b>{_safe(step.get('order', ''))}.</b> {_safe(step.get('label', ''))}<br/>"
+                      f"<font color=\"{_hex(sc)}\"><b>{_safe(sev)}</b></font>", S['td']),
+            Paragraph(f"{_safe(step.get('tactic', ''))}<br/><font name=\"Courier\">{_safe(step.get('tactic_id', ''))}</font>",
+                      S['td']),
+            Paragraph('<br/>'.join(techs) or '—', S['td']),
+            Paragraph(_safe(', '.join(str(x) for x in (step.get('finding_ids') or [])[:12])), S['td']),
+        ])
+
+    tbl = Table(rows, colWidths=[3.4*cm, 3.2*cm, 7*cm, 2.9*cm])
+    tbl.setStyle(TableStyle(list(_BASE_TBL_STYLE) + [
+        ('BACKGROUND', (0, 0), (-1, 0), C_DARK),
+        ('VALIGN',     (0, 0), (-1, -1), 'TOP'),
+    ] + _alt_rows(len(rows))))
+    story.append(tbl)
+    story.append(Spacer(1, 0.4*cm))
 
 
 def _build_strengths(story: list, analysis: dict) -> None:
@@ -1823,6 +1927,70 @@ def _build_methodology(story: list, scan_data: dict, timing: dict = None,
             S['small'],
         ))
 
+    _build_agent_journal(story, d)
+
+
+def _build_agent_journal(story: list, d: dict) -> None:
+    """
+    Journal des pivots choisis par la boucle agent (phase 8,
+    ``scan_results["agent_pivots"]``) : chaque décision, sa raison et son
+    issue, refus de périmètre compris. Rien si la boucle n'a pas tourné.
+    """
+    entry = d.get('agent_pivots') if isinstance(d, dict) else None
+    if not isinstance(entry, dict):
+        return
+    data = entry.get('data') if isinstance(entry.get('data'), dict) else {}
+
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph('<b>Pivots choisis par l\'agent IA</b>', S['h2']))
+    if entry.get('status') == 'skipped' or data.get('status') == 'skipped':
+        reason = entry.get('error') or data.get('stop_reason') or 'désactivée'
+        story.append(Paragraph(f'Boucle agent non exécutée : {_safe(str(reason)[:200])}.', S['small']))
+        return
+
+    backend = data.get('backend') if isinstance(data.get('backend'), dict) else {}
+    usage = data.get('usage') if isinstance(data.get('usage'), dict) else {}
+    budget = data.get('budget') if isinstance(data.get('budget'), dict) else {}
+    story.append(Paragraph(
+        f'Modèle : <b>{_safe(backend.get("name"))}</b> ({_safe(backend.get("model"))}) · '
+        f'arrêt : {_safe(data.get("stop_reason"))} · '
+        f'{_safe(usage.get("pivots_executed", 0))} pivot(s) exécuté(s), '
+        f'{_safe(usage.get("pivots_refused", 0))} refusé(s), '
+        f'budget {_safe(budget.get("max_pivots"))} pivots / profondeur {_safe(budget.get("max_depth"))}. '
+        f'L\'agent ne peut appeler que des outils passifs d\'une liste blanche, sur des cibles '
+        f'déjà observées dans le périmètre déclaré.',
+        S['small'],
+    ))
+    decisions = [x for x in (data.get('decisions') or []) if isinstance(x, dict)][:40]
+    if not decisions:
+        return
+    story.append(Spacer(1, 0.2*cm))
+    rows = [[Paragraph(t, S['th']) for t in ('#', 'Outil', 'Cible', 'Raison', 'Issue')]]
+    for x in decisions:
+        args = x.get('arguments') if isinstance(x.get('arguments'), dict) else {}
+        target = ', '.join(f'{v}' for k, v in args.items() if k != 'reason')[:80]
+        refusal = x.get('refusal') if isinstance(x.get('refusal'), dict) else None
+        outcome = x.get('outcome') or '—'
+        if refusal:
+            outcome = f'refusé ({refusal.get("code")})'
+        elif x.get('result_status'):
+            outcome = f'{outcome} · {x.get("result_status")}'
+        rows.append([
+            Paragraph(_safe(x.get('seq')), S['td_c']),
+            Paragraph(_safe(x.get('tool')), S['mono']),
+            Paragraph(_safe(target), S['mono']),
+            Paragraph(_safe(str(x.get('reason') or '')[:240]), S['td']),
+            Paragraph(_safe(str(outcome)[:60]), S['td']),
+        ])
+    tbl = Table(rows, colWidths=[0.8*cm, 3*cm, 4*cm, None, 3*cm], repeatRows=1)
+    tbl.setStyle(TableStyle(
+        list(_BASE_TBL_STYLE) + [
+            ('BACKGROUND', (0, 0), (-1, 0), C_NAVY),
+            ('VALIGN',     (0, 0), (-1, -1), 'TOP'),
+        ] + _alt_rows(len(rows))
+    ))
+    story.append(tbl)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  POINT D'ENTRÉE PUBLIC
@@ -1868,6 +2036,10 @@ def generate_pdf(
     # Transmettre le domaine au callback _page_content via l'objet doc
     doc._report_domain = str(domain)
 
+    # Phase 4 : constats annotés (techniques rendues possibles, mitigations)
+    # et chaîne d'attaque, recalculés par la table déterministe.
+    analysis = _with_attack(analysis)
+
     story: list = []
     _build_cover(story, analysis, recon, timing)
     _build_summary(story, analysis)
@@ -1875,6 +2047,7 @@ def generate_pdf(
     _build_findings(story, analysis)
     _build_attack_surface(story, analysis)
     _build_mitre_attack(story, analysis)
+    _build_attack_chain(story, analysis)
     _build_strengths(story, analysis)
     _build_actions(story, analysis)
     _build_metadata(story, analysis, recon, timing)

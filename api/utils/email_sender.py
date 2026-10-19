@@ -7,8 +7,6 @@ import string
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
 from datetime import datetime, timedelta
 import os
 
@@ -193,294 +191,139 @@ Si vous n'avez pas initié cette demande, ignorez cet email.
         raise Exception(f"Impossible d'envoyer l'email : {str(e)}")
 
 
-def _fmt_s(sec) -> str:
-    """Formate des secondes en chaîne lisible."""
-    if not sec:
-        return '—'
-    sec = float(sec)
-    if sec < 60:
-        return f'{sec:.1f}s'
-    m, s = divmod(int(sec), 60)
-    if m < 60:
-        return f'{m}min {s:02d}s'
-    h, m = divmod(m, 60)
-    return f'{h}h {m:02d}min {s:02d}s'
+_ALLOWED_RISK_LEVELS = {'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'}
 
 
-def send_report_email(
+def send_results_ready_email(
     to_email: str,
     firstname: str,
     lastname: str,
     domain: str,
+    access_code: str,
+    expires_at: datetime,
     risk_level: str,
-    risk_score: int,
-    pdf_bytes: bytes,
-    timing: dict,
+    risk_score,
     nb_findings: int = 0,
+    results_url: str = '',
 ) -> bool:
     """
-    Envoie le rapport PDF par email à l'utilisateur.
+    Annonce que le rapport est prêt et transmet le CODE D'ACCÈS — sans aucune
+    pièce jointe (décision D1 du plan d'action : un mail compromis ne doit
+    pas livrer le rapport à lui seul ; le PDF n'est plus joint).
 
-    Args:
-        to_email    : adresse de destination
-        firstname   : prénom du demandeur
-        lastname    : nom du demandeur
-        domain      : domaine analysé
-        risk_level  : CRITICAL | HIGH | MEDIUM | LOW
-        risk_score  : 0–100
-        pdf_bytes   : contenu binaire du PDF
-        timing      : {scan_duration_s, analysis_duration_s, total_duration_s}
-        nb_findings : nombre de findings dans le rapport
+    Le code n'est jamais journalisé. Il est le seul moyen de déchiffrer les
+    résultats (utils/result_vault.py) : le mail le dit explicitement.
+
+    `risk_level` vient du LLM : il est restreint à une énumération connue
+    avant d'entrer dans l'objet du mail (en-tête SMTP) et dans le corps.
     """
-
-    # Échappement HTML des valeurs fournies par l'utilisateur.
-    # firstname / lastname / domain proviennent de POST /recon, endpoint
-    # ANONYME et sans validation de format sur les noms. Interpolées telles
-    # quelles dans le corps HTML, elles permettaient d'injecter un lien de
-    # phishing dans un email expédié depuis un domaine authentifié SPF/DKIM.
     firstname = _html.escape(str(firstname or ''))[:64]
     lastname  = _html.escape(str(lastname or ''))[:64]
     domain    = _html.escape(str(domain or ''))[:253]
+    code      = _html.escape(str(access_code))
+    rl = str(risk_level or '').upper()
+    rl = rl if rl in _ALLOWED_RISK_LEVELS else 'N/A'
+    try:
+        score = int(risk_score)
+    except (TypeError, ValueError):
+        score = None
+    score_txt = f'{score} / 100' if score is not None else 'N/A'
+    expires_txt = expires_at.strftime('%d/%m/%Y à %H:%M UTC') if expires_at else '—'
+    url = results_url if str(results_url).startswith('https://') or str(results_url).startswith('http://') else ''
+    url_html = _html.escape(url, quote=True)
+
     sender   = os.getenv('SMTP_USERNAME') or EMAIL_SENDER
     password = os.getenv('SMTP_PASSWORD') or EMAIL_PASSWORD
-
     if not all([sender, password, EMAIL_HOST]):
-        raise ValueError(
-            "Variables SMTP manquantes : SMTP_USERNAME, SMTP_PASSWORD, SMTP_SERVER"
-        )
+        raise ValueError("Variables SMTP manquantes : SMTP_USERNAME, SMTP_PASSWORD, SMTP_SERVER")
 
-    # Couleurs par niveau de risque
-    risk_colors = {
-        'CRITICAL': ('#ef4444', '#fef2f2'),
-        'HIGH':     ('#f97316', '#fff7ed'),
-        'MEDIUM':   ('#f59e0b', '#fffbeb'),
-        'LOW':      ('#10b981', '#f0fdf4'),
-    }
-    rl = str(risk_level).upper()
-    risk_fg, risk_bg = risk_colors.get(rl, ('#64748b', '#f8fafc'))
-
-    total_s    = _fmt_s(timing.get('total_duration_s'))
-    scan_s     = _fmt_s(timing.get('scan_duration_s'))
-    analysis_s = _fmt_s(timing.get('analysis_duration_s'))
-    now_str    = datetime.utcnow().strftime('%d/%m/%Y à %H:%M UTC')
-    filename   = f'rapport_osint_{domain}.pdf'
+    link_html = (
+        f'<p style="margin:0 0 24px;text-align:center;">'
+        f'<a href="{url_html}" style="display:inline-block;background:#0f172a;color:#9fef00;'
+        f'font-weight:700;text-decoration:none;padding:12px 28px;border-radius:8px;">'
+        f'Voir le résultat</a></p>'
+    ) if url else ''
+    link_text = f"Page de consultation : {url}\n" if url else ''
 
     html = f"""<!DOCTYPE html>
 <html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rapport OSINT — {domain}</title>
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Votre rapport Recon IA est prêt</title></head>
 <body style="margin:0;padding:0;background:#f0f9ff;font-family:'Segoe UI',Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f9ff;padding:36px 0;">
-  <tr><td align="center">
-  <table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%;">
-
-    <!-- Header -->
-    <tr>
-      <td style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:16px 16px 0 0;padding:32px 40px;text-align:center;">
-        <p style="margin:0 0 4px;font-size:26px;font-weight:700;color:#f1f5f9;letter-spacing:-0.5px;">
-          Recon <span style="color:#00d4ff;">IA</span>
-        </p>
-        <p style="margin:0;font-size:12px;color:#64748b;letter-spacing:1px;text-transform:uppercase;">
-          Rapport de Sécurité OSINT
-        </p>
-      </td>
-    </tr>
-
-    <!-- Bande couleur risque -->
-    <tr>
-      <td style="background:{risk_fg};height:4px;"></td>
-    </tr>
-
-    <!-- Corps -->
-    <tr>
-      <td style="background:#ffffff;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;padding:40px 44px 36px;">
-
-        <p style="margin:0 0 24px;font-size:15px;color:#1e293b;line-height:1.6;">
-          Bonjour <strong>{firstname} {lastname}</strong>,
-        </p>
-        <p style="margin:0 0 28px;font-size:14px;color:#475569;line-height:1.7;">
-          Votre rapport de sécurité OSINT pour <strong style="color:#0f172a;">{domain}</strong>
-          est prêt. Il est joint à cet email au format PDF.
-        </p>
-
-        <!-- Badge risque -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:32px;">
-          <tr>
-            <td align="center">
-              <div style="display:inline-block;background:{risk_bg};border:2px solid {risk_fg};border-radius:12px;padding:20px 40px;text-align:center;">
-                <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:{risk_fg};letter-spacing:2px;text-transform:uppercase;">
-                  Niveau de risque global
-                </p>
-                <p style="margin:0;font-size:36px;font-weight:800;color:{risk_fg};line-height:1.1;">
-                  {risk_level}
-                </p>
-                <p style="margin:4px 0 0;font-size:16px;color:#475569;">
-                  Score : <strong style="color:{risk_fg};">{risk_score}</strong> / 100
-                </p>
-              </div>
-            </td>
-          </tr>
-        </table>
-
-        <!-- Métriques -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
-          <tr style="background:#f8fafc;">
-            <td style="padding:10px 16px;border-bottom:1px solid #e2e8f0;">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Domaine analysé</p>
-              <p style="margin:2px 0 0;font-size:14px;font-weight:700;color:#0f172a;font-family:'Courier New',monospace;">{domain}</p>
-            </td>
-            <td style="padding:10px 16px;border-bottom:1px solid #e2e8f0;border-left:1px solid #e2e8f0;">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Findings identifiés</p>
-              <p style="margin:2px 0 0;font-size:14px;font-weight:700;color:#0f172a;">{nb_findings} finding(s)</p>
-            </td>
-          </tr>
-          <tr style="background:#ffffff;">
-            <td style="padding:10px 16px;border-bottom:1px solid #e2e8f0;">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Durée totale du processus</p>
-              <p style="margin:2px 0 0;font-size:14px;font-weight:700;color:#0f172a;">{total_s}</p>
-            </td>
-            <td style="padding:10px 16px;border-bottom:1px solid #e2e8f0;border-left:1px solid #e2e8f0;">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Date du rapport</p>
-              <p style="margin:2px 0 0;font-size:14px;font-weight:700;color:#0f172a;">{now_str}</p>
-            </td>
-          </tr>
-          <tr style="background:#f8fafc;">
-            <td style="padding:10px 16px;">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Durée scan OSINT</p>
-              <p style="margin:2px 0 0;font-size:14px;font-weight:700;color:#0f172a;">{scan_s}</p>
-            </td>
-            <td style="padding:10px 16px;border-left:1px solid #e2e8f0;">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Durée analyse IA</p>
-              <p style="margin:2px 0 0;font-size:14px;font-weight:700;color:#0f172a;">{analysis_s}</p>
-            </td>
-          </tr>
-        </table>
-
-        <!-- Note pièce jointe -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
-          <tr>
-            <td style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;">
-              <table cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="padding-right:10px;font-size:20px;" valign="top">📎</td>
-                  <td style="font-size:13px;color:#1e40af;line-height:1.5;">
-                    Le rapport PDF complet <strong>{filename}</strong> est joint à cet email.
-                    Il contient l'analyse détaillée, les recommandations priorisées et la surface
-                    d'attaque identifiée.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-
-        <!-- Avertissement confidentialité -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
-          <tr>
-            <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;">
-              <table cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="padding-right:10px;font-size:18px;color:#64748b;" valign="top">🔒</td>
-                  <td style="font-size:12px;color:#475569;line-height:1.5;">
-                    Ce rapport est <strong>confidentiel</strong>. Il contient des informations
-                    sensibles sur l'infrastructure de votre domaine. Ne le partagez qu'avec les
-                    personnes autorisées.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-
-      </td>
-    </tr>
-
-    <!-- Bande dégradée -->
-    <tr>
-      <td style="background:linear-gradient(90deg,#00d4ff,#7c3aed);height:3px;"></td>
-    </tr>
-
-    <!-- Footer -->
-    <tr>
-      <td style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:22px 40px;text-align:center;">
-        <p style="margin:0 0 4px;font-size:12px;color:#94a3b8;">
-          &copy; 2026 <strong style="color:#6366f1;">Recon IA</strong> &mdash; Plateforme de Reconnaissance Passive OSINT
-        </p>
-        <p style="margin:0;font-size:11px;color:#cbd5e1;font-family:'Courier New',monospace;">
-          idachallenge.bj
-        </p>
-      </td>
-    </tr>
-
-  </table>
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%;">
+  <tr><td style="background:#0f172a;border-radius:16px 16px 0 0;padding:28px 40px;text-align:center;">
+    <p style="margin:0;font-size:24px;font-weight:700;color:#f1f5f9;">Recon <span style="color:#9fef00;">IA</span></p>
+    <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;letter-spacing:1px;text-transform:uppercase;">Votre rapport est prêt</p>
+  </td></tr>
+  <tr><td style="background:#ffffff;border:1px solid #e2e8f0;border-top:none;padding:36px 44px;">
+    <p style="margin:0 0 20px;font-size:15px;color:#1e293b;">Bonjour <strong>{firstname} {lastname}</strong>,</p>
+    <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.7;">
+      L'analyse de reconnaissance passive de <strong style="color:#0f172a;">{domain}</strong> est terminée.
+      Pour des raisons de sécurité, le rapport n'est pas joint à ce message : il est chiffré
+      et consultable uniquement avec le code ci-dessous.
+    </p>
+    <p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:1px;">Votre code d'accès</p>
+    <p style="margin:0 0 24px;padding:16px;background:#0f172a;color:#9fef00;border-radius:8px;
+              font-family:'Courier New',monospace;font-size:15px;word-break:break-all;text-align:center;">{code}</p>
+    {link_html}
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;border:1px solid #e2e8f0;border-radius:10px;">
+      <tr>
+        <td style="padding:10px 16px;font-size:13px;color:#475569;">Niveau de risque : <strong>{rl}</strong></td>
+        <td style="padding:10px 16px;font-size:13px;color:#475569;">Score : <strong>{score_txt}</strong></td>
+        <td style="padding:10px 16px;font-size:13px;color:#475569;">Constats : <strong>{int(nb_findings or 0)}</strong></td>
+      </tr>
+    </table>
+    <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.6;">
+      ⏳ Ce code est valable jusqu'au <strong>{expires_txt}</strong>.
+    </p>
+    <p style="margin:0;font-size:12px;color:#b91c1c;line-height:1.6;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 14px;">
+      🔒 Conservez ce code et ne le partagez pas : toute personne qui le détient peut lire le rapport.
+      Nous ne le conservons pas — s'il est perdu, le rapport ne pourra pas être récupéré et il faudra relancer une analyse.
+    </p>
+  </td></tr>
+  <tr><td style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:18px 40px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">&copy; 2026 Recon IA &mdash; Reconnaissance passive OSINT</p>
   </td></tr>
 </table>
-</body>
-</html>"""
+</td></tr></table>
+</body></html>"""
 
-    text = f"""Recon IA — Rapport de Sécurité OSINT
+    text = f"""Recon IA — Votre rapport est prêt
 
 Bonjour {firstname} {lastname},
 
-Votre rapport de sécurité OSINT pour {domain} est prêt.
+L'analyse de reconnaissance passive de {domain} est terminée.
+Le rapport n'est pas joint : il est chiffré et consultable uniquement avec ce code.
 
-═══════════════════════════════════════
-RÉSULTATS
-═══════════════════════════════════════
-Domaine analysé   : {domain}
-Niveau de risque  : {risk_level}
-Score             : {risk_score} / 100
-Findings          : {nb_findings}
+Votre code d'accès :
+{access_code}
 
-═══════════════════════════════════════
-DÉLAIS
-═══════════════════════════════════════
-Durée totale      : {total_s}
-Scan OSINT        : {scan_s}
-Analyse IA        : {analysis_s}
-Date du rapport   : {now_str}
+{link_text}Niveau de risque : {rl} — Score : {score_txt} — Constats : {int(nb_findings or 0)}
+Code valable jusqu'au {expires_txt}.
 
-Le rapport PDF complet est joint à cet email ({filename}).
-
-Ce document est confidentiel — usage interne uniquement.
-
-© 2026 Recon IA — idachallenge.bj
+Conservez ce code et ne le partagez pas : toute personne qui le détient peut lire le rapport.
+Nous ne le conservons pas. S'il est perdu, le rapport ne pourra pas être récupéré.
 """
 
-    msg = MIMEMultipart('mixed')
+    msg = MIMEMultipart('alternative')
     msg['From']    = f'Recon IA <{sender}>'
     msg['To']      = to_email
-    msg['Subject'] = f'[Recon IA] Rapport de sécurité OSINT — {domain} — Risque {risk_level}'
-
-    # Corps HTML + texte
-    alt = MIMEMultipart('alternative')
-    alt.attach(MIMEText(text, 'plain', 'utf-8'))
-    alt.attach(MIMEText(html, 'html', 'utf-8'))
-    msg.attach(alt)
-
-    # Pièce jointe PDF
-    pdf_part = MIMEBase('application', 'pdf')
-    pdf_part.set_payload(pdf_bytes)
-    encoders.encode_base64(pdf_part)
-    pdf_part.add_header(
-        'Content-Disposition',
-        f'attachment; filename="{filename}"',
-    )
-    msg.attach(pdf_part)
+    msg['Subject'] = f'[Recon IA] Votre rapport pour {domain} est prêt'
+    msg.attach(MIMEText(text, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html, 'html', 'utf-8'))
 
     try:
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
             server.starttls()
             server.login(sender, password)
             server.sendmail(sender, to_email, msg.as_string())
-        logger.info("Rapport PDF envoyé à %s pour %s", to_email, domain)
+        logger.info("Mail « rapport prêt » envoyé à %s pour %s", to_email, domain)
         return True
     except Exception as e:
-        logger.error("Échec envoi rapport à %s : %s", to_email, e)
-        raise Exception(f"Impossible d'envoyer le rapport : {e}")
+        logger.error("Échec envoi mail « rapport prêt » à %s : %s", to_email, e)
+        raise Exception(f"Impossible d'envoyer le mail de résultat : {e}")
 
 
 def validate_code(recon, code: str) -> tuple[bool, str]:
@@ -767,4 +610,90 @@ Support : {_ADMIN_EMAIL}
         return True
     except Exception as e:
         logger.error("Échec envoi email d'erreur à %s : %s", to_email, e)
+        return False
+
+
+def send_monitoring_alert(to_email: str, domain: str, diff: dict, scanned_at: datetime = None) -> bool:
+    """
+    Alerte de surveillance (plan d'action, phase 7) : changement significatif
+    détecté par un rescan planifié d'un domaine surveillé.
+
+    Destinée à l'ADMINISTRATEUR uniquement (jamais au demandeur). Le corps ne
+    reprend que le résumé du différentiel (utils/scan_diff.py) et quelques
+    éléments techniques publics ajoutés (sous-domaines, IP, ports, CVE), tous
+    échappés : ces valeurs viennent d'outils OSINT, donc de la cible.
+    Retourne False (sans lever) si le SMTP n'est pas configuré ou si l'envoi échoue.
+    """
+    sender   = os.getenv('SMTP_USERNAME') or EMAIL_SENDER
+    password = os.getenv('SMTP_PASSWORD') or EMAIL_PASSWORD
+    if not all([sender, password, EMAIL_HOST, to_email]):
+        logger.warning("send_monitoring_alert: SMTP ou destinataire non configuré — alerte non envoyée")
+        return False
+
+    diff = diff if isinstance(diff, dict) else {}
+    domain_txt = str(domain or '')[:253]
+    domain_html = _html.escape(domain_txt)
+    when = (scanned_at or datetime.utcnow()).strftime('%d/%m/%Y à %H:%M UTC')
+    summary = [str(s)[:200] for s in (diff.get('summary') or []) if s][:20]
+
+    details = []
+    for key, label in (('subdomains', 'Nouveaux sous-domaines'), ('ips', 'Nouvelles IP'),
+                       ('ports', 'Nouveaux ports'), ('cves', 'Nouvelles CVE')):
+        section = diff.get(key) if isinstance(diff.get(key), dict) else {}
+        added = [str(v)[:120] for v in (section.get('added') or [])][:15]
+        if added:
+            more = section.get('added_count', len(added)) - len(added)
+            details.append((label, added, more if more > 0 else 0))
+
+    summary_html = ''.join(f'<li>{_html.escape(s)}</li>' for s in summary) or '<li>—</li>'
+    details_html = ''.join(
+        f'<p style="margin:12px 0 4px;font-weight:600;color:#0f172a;">{_html.escape(label)}</p>'
+        f'<p style="margin:0;font-family:\'Courier New\',monospace;font-size:12px;color:#334155;">'
+        f'{"<br>".join(_html.escape(v) for v in values)}'
+        f'{f"<br>… et {more} autre(s)" if more else ""}</p>'
+        for label, values, more in details
+    )
+    html = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><title>Surveillance Recon IA</title></head>
+<body style="margin:0;padding:24px;background:#f0f9ff;font-family:'Segoe UI',Arial,sans-serif;">
+<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;">
+<tr><td style="background:#0f172a;border-radius:12px 12px 0 0;padding:20px 32px;">
+  <p style="margin:0;font-size:20px;font-weight:700;color:#f1f5f9;">Recon <span style="color:#9fef00;">IA</span> — Surveillance</p>
+</td></tr>
+<tr><td style="padding:24px 32px;">
+  <p style="margin:0 0 12px;font-size:14px;color:#1e293b;">Changement significatif détecté sur <strong>{domain_html}</strong>
+  (rescan passif du {when}).</p>
+  <ul style="margin:0 0 12px;padding-left:20px;font-size:13px;color:#475569;">{summary_html}</ul>
+  {details_html}
+  <p style="margin:20px 0 0;font-size:12px;color:#64748b;">Détail complet : dashboard admin, onglet « Graphe &amp; surveillance ».
+  Reconnaissance passive uniquement — aucune interaction intrusive avec la cible.</p>
+</td></tr></table></body></html>"""
+
+    text_lines = [f'Recon IA — Surveillance', '',
+                  f'Changement significatif détecté sur {domain_txt} (rescan passif du {when}).', '']
+    text_lines += [f'- {s}' for s in summary] or ['- —']
+    for label, values, more in details:
+        text_lines += ['', f'{label} :'] + [f'  {v}' for v in values]
+        if more:
+            text_lines.append(f'  … et {more} autre(s)')
+    text_lines += ['', 'Détail complet : dashboard admin, onglet « Graphe & surveillance ».']
+
+    msg = MIMEMultipart('alternative')
+    msg['From']    = f'Recon IA <{sender}>'
+    msg['To']      = to_email
+    # Domaine filtré pour l'en-tête SMTP (déjà validé en amont, défense en profondeur)
+    subject_domain = ''.join(c for c in domain_txt if c.isalnum() or c in '.-')
+    msg['Subject'] = f'[Recon IA] Surveillance — changement sur {subject_domain}'
+    msg.attach(MIMEText('\n'.join(text_lines), 'plain', 'utf-8'))
+    msg.attach(MIMEText(html, 'html', 'utf-8'))
+
+    try:
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+            server.starttls()
+            server.login(sender, password)
+            server.sendmail(sender, to_email, msg.as_string())
+        logger.info("Alerte de surveillance envoyée — domaine=%s", subject_domain)
+        return True
+    except Exception as e:
+        logger.error("Échec envoi alerte de surveillance (%s) : %s", subject_domain, e)
         return False
