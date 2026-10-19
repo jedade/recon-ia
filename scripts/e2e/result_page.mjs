@@ -62,6 +62,10 @@ async function shot(name, width, height) {
 }
 
 await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable');
+// THEME=light|dark : thème imposé avant le premier rendu (clé de theme.js)
+if (process.env.THEME) {
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('reconia.theme', ${JSON.stringify(process.env.THEME)}); } catch (e) {}` });
+}
 await send('Page.navigate', { url: PAGE });
 await sleep(1500);
 await shot('01-acces.png', 1366, 900);
@@ -94,6 +98,37 @@ const state = await evaluate(`({
   navigatorButton: !!document.getElementById('navigator-btn'),
 })`);
 const objectLeak = await evaluate('document.body.innerText.includes("[object ")');
+// Vue d'ensemble : graphiques, globe (canvas réellement dessiné), cartographie
+await sleep(2500);
+// Cartes d'outils : aucune valeur écrasée (une lettre par ligne)
+const squeezed = await evaluate(`[...document.querySelectorAll(".tool-card dd")].filter(d => {
+  const r = d.getBoundingClientRect(); return r.width > 0 && r.width < 60 && (d.textContent || "").trim().length > 6; }).length`);
+const cardRect = await evaluate(`(() => { const c = document.getElementById("tool-security_headers"); if (!c) return null;
+  c.scrollIntoView(); const r = c.getBoundingClientRect(); return { x: r.left, y: r.top + scrollY, w: r.width, h: r.height }; })()`);
+if (cardRect) {
+  const cap = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true,
+    clip: { x: cardRect.x, y: cardRect.y, width: cardRect.w, height: Math.min(cardRect.h, 1600), scale: 1 } });
+  writeFileSync(join(DIR, '04-carte-entetes.png'), Buffer.from(cap.result.data, 'base64'));
+}
+const reliability = await evaluate(`({
+  coverage: (document.querySelector(".reliability:nth-child(2) .big-figure") || {}).textContent,
+  reviews: [...document.querySelectorAll(".tool-card .review")].map(e => e.textContent),
+  reviewHtml: document.querySelectorAll(".tool-card .review b").length,
+})`);
+const visuals = await evaluate(`(() => {
+  const c = document.querySelector("canvas.globe");
+  let painted = 0;
+  if (c) { const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < d.length; i += 4 * 97) if (d[i] > 0) painted++; }
+  return {
+    donuts: document.querySelectorAll("svg.donut .donut-seg").length,
+    bars: document.querySelectorAll(".hbars li").length,
+    globePainted: painted,
+    places: [...document.querySelectorAll(".geo-list strong")].map(e => e.textContent),
+    graphNodes: document.querySelectorAll("svg.infra-graph .node").length,
+    graphEdges: document.querySelectorAll("svg.infra-graph .edge").length,
+  };
+})()`);
 await shot('02-rapport-bureau.png', 1366, 900);
 
 // Filtre de sévérité + filtre de catégorie + recherche
@@ -163,6 +198,14 @@ const checks = {
   'layer Navigator refusé sans session': navigator.anonStatus === 401,
   'fermeture de session': logout.access && logout.session === null,
   '« [object » jamais affiché': !objectLeak,
+  'cartes d\'outils : aucune valeur écrasée': squeezed === 0,
+  'couverture calculée et affichée (avis + règles)': /%/.test(reliability.coverage || ''),
+  'avis par outil affichés, outil inventé écarté': reliability.reviews.length === 3 && !reliability.reviews.some(t => t.includes('ne doit pas')),
+  'note d\'avis piégée affichée comme du texte': reliability.reviewHtml === 0 && reliability.reviews.some(t => t.includes('<b>')),
+  'graphiques : donuts et barres dessinés': visuals.donuts >= 4 && visuals.bars >= 1,
+  'globe dessiné avec les serveurs (Paris, Cotonou)': visuals.globePainted > 50 && visuals.places.some(p => p.startsWith('Paris')) && visuals.places.length === 2,
+  'ville piégée du globe affichée comme du texte': visuals.places.some(p => p.includes('<img')),
+  'cartographie : domaine, 2 IP, 3 sous-domaines': visuals.graphNodes === 6 && visuals.graphEdges >= 5,
 };
 let failed = 0;
 for (const [name, ok] of Object.entries(checks)) {

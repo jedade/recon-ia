@@ -208,6 +208,31 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _reduce_output_usable(content: str) -> bool:
+    """
+    La synthèse REDUCE est-elle exploitable ? Objet JSON (éventuellement
+    entouré de <think>…</think> ou de ```json) contenant une liste `findings`.
+    Volontairement simple : en cas de doute, le repli sur les constats MAP
+    reste un rapport valide.
+    """
+    if not isinstance(content, str) or not content.strip():
+        return False
+    text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text).strip()
+    candidates = [text]
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        candidates.append(text[start:end + 1])
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("findings"), list):
+            return True
+    return False
+
+
 def _truncate_to_tokens(text: str, max_tokens: int) -> str:
     """Tronque le texte à max_tokens (approximatif)."""
     max_chars = max_tokens * 4
@@ -738,6 +763,12 @@ class OllamaClient:
                 "[map-reduce][reduce] Rapport généré — %d caractères",
                 len(final_msg.get("content", "")),
             )
+            # Un petit modèle peut produire une synthèse non analysable (JSON
+            # tronqué ou mal formé). Constaté sur la stack réelle : le dossier
+            # entier échouait alors que les constats MAP étaient valides. On
+            # traite ce cas comme une erreur de synthèse → même repli.
+            if not _reduce_output_usable(final_msg.get("content", "")):
+                raise ValueError("synthèse REDUCE non analysable (JSON invalide ou sans findings)")
             return final_msg, all_searches, []
         except Exception as exc:
             # La synthèse (déduplication inter-sections, risk_score global,

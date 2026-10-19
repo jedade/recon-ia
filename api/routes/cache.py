@@ -117,7 +117,7 @@ def get_cache_entry(entry_id: int):
 def export_cache_entry(entry_id: int):
     entry, result, corrupted = _load(entry_id)
     payload = {'cache': entry.to_dict(), 'corrupted': corrupted, 'scan_results': result}
-    filename = f'recon_ia_scan_brut_{_safe_filename_part(entry.domain)}_{entry.id}.json'
+    filename = f'reconia_scan_brut_{_safe_filename_part(entry.domain)}_{entry.id}.json'
     response = Response(json.dumps(payload, ensure_ascii=False, indent=2, default=str),
                         mimetype='application/json; charset=utf-8')
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'

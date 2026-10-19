@@ -43,6 +43,7 @@ Le module ne fait aucun appel réseau : la liste KEV est passée par
 l'appelant (utils/kev.py).
 """
 import logging
+import threading
 import os
 import re
 import unicodedata
@@ -485,11 +486,20 @@ _COMPILED = {
 #  Lecture des données brutes du scan
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Outils dont les règles lisent réellement les données pendant
+# detect_observations (couverture de l'analyse : un outil examiné par une
+# règle déterministe compte comme examiné, même s'il n'a rien révélé).
+_EXAMINED = threading.local()
+
+
 def _tool(scan: Dict, key: str) -> Tuple[Optional[str], Dict]:
     entry = scan.get(key)
     if not isinstance(entry, dict):
         return None, {}
     data = entry.get("data")
+    tracked = getattr(_EXAMINED, "tools", None)
+    if tracked is not None and entry.get("status") == "success" and data not in (None, {}, [], ""):
+        tracked.add(key)
     return entry.get("status"), (data if isinstance(data, dict) else {})
 
 
@@ -576,6 +586,17 @@ def detect_observations(scan: Dict, kev: Optional[Dict] = None) -> Dict[str, Dic
     """
     scan = scan if isinstance(scan, dict) else {}
     kev = kev or {}
+    _EXAMINED.tools = set()
+    try:
+        out = _detect_observations(scan, kev)
+        # Méta-entrée (préfixe « _ » : jamais traitée comme une règle)
+        out["_examined_tools"] = {"state": "meta", "tools": sorted(_EXAMINED.tools)}
+        return out
+    finally:
+        _EXAMINED.tools = None
+
+
+def _detect_observations(scan: Dict, kev: Dict) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {rid: _obs("unknown") for rid in RULES}
 
     # ── Email ────────────────────────────────────────────────────────────────

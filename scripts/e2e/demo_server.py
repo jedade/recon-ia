@@ -34,6 +34,8 @@ with app.app_context():
     from routes.recon import TOOLS_REGISTRY
     from utils import result_vault
     from utils.mitre_attack import map_tools_to_techniques
+    from utils.coverage_check import compute_coverage_check
+    from routes.analyze import _sanitize_tool_reviews
 
     def tool(key, status, data, raw=''):
         return {'meta': TOOLS_REGISTRY[key], 'status': status, 'data': data, 'raw_output': raw}
@@ -47,15 +49,33 @@ with app.app_context():
         'dnssec': tool('dnssec', 'success', {'enabled': False, 'has_dnskey': False, 'has_ds': False}),
         'ssl_info': tool('ssl_info', 'success', {'issuer': "Let's Encrypt R11", 'not_after': '2026-12-30',
                                                  'protocol': 'TLSv1.3', 'san': ['example.bj', 'www.example.bj']}),
+        # En-tête riche (6 champs, longue valeur) : cas réel qui s'affichait
+        # une lettre par ligne dans une carte étroite.
         'security_headers': tool('security_headers', 'success', {'grade': 'D', 'headers': {
-            'Strict-Transport-Security': {'present': True}, 'Content-Security-Policy': {'present': False},
-            'X-Frame-Options': {'present': False}}}),
+            'content-security-policy': {'name': 'CSP', 'present': True, 'recommendation': None, 'score': 2,
+                                        'valid': True, 'value': "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; "
+                                                                "style-src 'self' https://fonts.googleapis.com; img-src 'self' data:; frame-ancestors 'none'"},
+            'Strict-Transport-Security': {'present': True}, 'X-Frame-Options': {'present': False}}}),
         'dmarc_check': tool('dmarc_check', 'success', {'record': None, 'policy': None, 'present': False}),
         'shodan_internetdb': tool('shodan_internetdb', 'success', {'ports': [22, 80, 443], 'vulns': ['CVE-2023-48795'],
                                                                    'cpes': ['cpe:/a:openbsd:openssh:8.9']}),
         'subdomain_takeover': tool('subdomain_takeover', 'success', {'vulnerable': [], 'vulnerable_count': 0, 'checked_count': 12}),
         'headers': tool('headers', 'success', {'admin.example.bj': {'status': 'success', 'http_status': 401},
                                                'evil.example.bj': {'status': 'blocked', 'error': 'adresse interne'}}),
+        # Géolocalisation (globe) et résolution des sous-domaines (cartographie) ;
+        # une ville contient du HTML piégé : elle doit s'afficher comme du texte.
+        'ip_info': tool('ip_info', 'success', {'ips': [
+            {'ip': '93.184.216.34', 'city': 'Paris', 'region': 'Île-de-France', 'country': 'FR',
+             'loc': '48.8566,2.3522', 'org': 'AS16276 OVH SAS'},
+            {'ip': '196.192.16.5', 'city': '<img src=x onerror=alert(5)>Cotonou', 'country': 'BJ',
+             'loc': '6.3703,2.3912', 'org': 'AS37090 Benin Telecoms'},
+        ]}),
+        'dns_mass': tool('dns_mass', 'success', {'hosts': [
+            {'subdomain': 'www.example.bj', 'status': 'alive', 'ips': ['93.184.216.34']},
+            {'subdomain': 'mail.example.bj', 'status': 'alive', 'ips': ['196.192.16.5']},
+            {'subdomain': 'admin.example.bj', 'status': 'alive', 'ips': ['93.184.216.34']},
+            {'subdomain': 'old.example.bj', 'status': 'dead', 'ips': []},
+        ], 'alive_count': 3, 'dead_count': 1}),
         'abuseipdb_check': tool('abuseipdb_check', 'skipped', {}),
         'typosquatting': tool('typosquatting', 'timeout', {}),
         'cache': {'hit': False, 'scan_duration_s': 212.4},
@@ -102,9 +122,18 @@ with app.app_context():
         'mitre_attack': map_tools_to_techniques(executed),
         'grounding_check': {'total_findings': 6, 'verified': 1, 'verified_pct': 25.0,
                             'method': 'Chevauchement textuel entre la preuve et la donnée brute.'},
-        'coverage_check': {'coverage_pct': 71.4, 'tools_unreferenced': ['whois', 'ssl_info'],
-                           'rag_snippets_used': 3, 'rag_snippets_available': 6},
+        # Avis par outil (tool_reviews) : passés par la validation serveur ;
+        # une note piégée doit rester du texte, un outil inventé est écarté.
+        'tool_reviews': _sanitize_tool_reviews([
+            {'tool': 'whois', 'verdict': 'ras', 'note': 'Domaine enregistré chez OVH, expiration en 2027.'},
+            {'tool': 'ip_info', 'verdict': 'info', 'note': '<b>Hébergé</b> en France et au Bénin.'},
+            {'tool': 'dmarc_check', 'verdict': 'constat', 'note': 'Aucune politique DMARC publiée.'},
+            {'tool': 'outil_invente', 'verdict': 'ras', 'note': 'ne doit pas apparaître'},
+        ], scan),
     }
+    analysis['coverage_check'] = compute_coverage_check(
+        analysis, scan, {'rag_context': [{'source': 'RFC 7489'}] * 6},
+        rule_examined=['dmarc_check', 'dnssec', 'shodan_internetdb', 'ssl_info', 'security_headers', 'subdomain_takeover'])
     recon = Recon(domain='example.bj', firstname='Ada', lastname='Lovelace', email='ada@example.bj',
                   accord=True, verification=True, status='success', current_step='completed',
                   scan_results=json.dumps(scan), analysis_result=json.dumps(analysis),

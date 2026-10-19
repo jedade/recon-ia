@@ -9,7 +9,10 @@ Avantages :
   - Fenêtre de contexte très large (1 M tokens sur Gemini 1.5 Pro)
   - Quota généreux sur le plan gratuit (1 500 req/jour sur Flash)
   - Excellent support du tool use (function calling natif)
-  - Modèles : gemini-2.5-pro, gemini-2.0-flash, gemini-1.5-flash
+  - Modèles : liste lue au démarrage sur l'API (ceux que la clé propose
+    réellement), alias « gemini-flash-latest » par défaut. Google retire
+    régulièrement des versions (gemini-2.0-flash : 404 en 2026) : une liste
+    figée finit toujours par ne plus contenir aucun modèle valide.
 
 Stratégie de fiabilité :
   1. File de modèles avec rotation automatique sur 429 / quota
@@ -26,12 +29,18 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import openai
+import requests
 
 logger = logging.getLogger(__name__)
 
+# Plafond de sortie : la réponse JSON contient findings ET tool_reviews.
+_MAX_OUT       = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8192"))
+_MAX_OUT_TOOLS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS_WITH_TOOLS", "4096"))
+
 _API_KEY               = os.getenv("GEMINI_API_KEY", "")
 _BASE_URL              = "https://generativelanguage.googleapis.com/v1beta/openai/"
-_DEFAULT_MODEL         = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+# Alias tenu à jour par Google : survit au retrait des versions numérotées
+_DEFAULT_MODEL         = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 _MAX_ROUNDS            = int(os.getenv("ANALYSIS_MAX_SEARCH_ROUNDS", "6"))
 _MAX_TOOL_RESULT_CHARS = int(os.getenv("GEMINI_MAX_TOOL_RESULT_CHARS", "3000"))
 _MAX_TOOL_CALLS_PER_ROUND = int(os.getenv("GEMINI_MAX_TOOL_CALLS_PER_ROUND", "3"))
@@ -39,12 +48,46 @@ _TPM_SLEEP             = float(os.getenv("GEMINI_TPM_SLEEP", "15"))
 
 # Modèles Gemini disponibles — ordre de préférence
 # Tous supportent le function calling (tool use)
+# Ordre de préférence parmi les modèles réellement proposés par l'API ;
+# sert aussi de repli si la liste ne peut pas être lue.
 _MODEL_PRIORITY = [
-    "gemini-2.5-pro-preview-05-06",  # Meilleur raisonnement, contexte 1M
-    "gemini-2.0-flash",              # Rapide, 1 500 req/jour gratuit
-    "gemini-1.5-pro",                # Contexte 1M tokens, bon raisonnement
-    "gemini-1.5-flash",              # Fallback léger
+    "gemini-flash-latest",           # Alias Flash courant (rapide, quota gratuit généreux)
+    "gemini-pro-latest",             # Alias Pro courant (meilleur raisonnement)
 ]
+# Repli léger, placé après les versions numérotées
+_LAST_RESORT = ["gemini-flash-lite-latest"]
+# Utilisé seulement si la liste de l'API est illisible
+_OFFLINE_QUEUE = _MODEL_PRIORITY + ["gemini-2.5-flash", "gemini-2.5-pro"] + _LAST_RESORT
+# Modèles sans intérêt pour l'analyse texte + function calling
+_EXCLUDE_MODEL_PATTERNS = ("tts", "image", "embedding", "aqa", "live", "audio",
+                           "vision", "banana", "imagen", "veo", "gemma", "robotics",
+                           "computer-use", "customtools", "learnlm", "transcribe", "omni")
+_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def _available_models() -> List[str]:
+    """
+    Modèles texte proposés par la clé (generateContent), ou [] si la liste
+    est illisible (réseau, clé invalide) — l'appelant se rabat alors sur
+    _MODEL_PRIORITY.
+    """
+    if not _API_KEY:
+        return []
+    try:
+        r = requests.get(_MODELS_URL, headers={"x-goog-api-key": _API_KEY},
+                         params={"pageSize": 200}, timeout=10)
+        r.raise_for_status()
+        out = []
+        for m in r.json().get("models", []):
+            name = str(m.get("name", "")).split("/")[-1]
+            if ("generateContent" in (m.get("supportedGenerationMethods") or [])
+                    and name.startswith("gemini")
+                    and not any(p in name for p in _EXCLUDE_MODEL_PATTERNS)):
+                out.append(name)
+        return out
+    except Exception as e:
+        logger.warning("[gemini] Liste des modèles indisponible (%s) — file par défaut", e)
+        return []
 
 WEB_SEARCH_TOOL: Dict[str, Any] = {
     "type": "function",
@@ -122,6 +165,14 @@ def _is_model_unavailable(err_str: str) -> bool:
     )
 
 
+def _is_overloaded(err_str: str) -> bool:
+    """Modèle saturé côté Google (503 UNAVAILABLE, « high demand »), constaté
+    sur gemini-flash-latest : passer au modèle suivant plutôt que d'abandonner
+    Gemini — un autre modèle de la file répond en général."""
+    lower = err_str.lower()
+    return "503" in err_str or "unavailable" in lower or "high demand" in lower or "overloaded" in lower
+
+
 def _trim_msgs_for_final_report(msgs: List[Any]) -> List[Any]:
     """Réduit la conversation avant le rapport final pour éviter les erreurs de contexte."""
     if len(msgs) <= 5:
@@ -140,6 +191,30 @@ def _trim_msgs_for_final_report(msgs: List[Any]) -> List[Any]:
     result = head + tail
     logger.info("[gemini] Conversation tronquée avant rapport final : %d → %d msgs", len(msgs), len(result))
     return result
+
+
+# Modèles écartés temporairement (partagé entre analyses, par processus) :
+# un modèle refusé n'est pas réessayé en tête de file à chaque analyse.
+_COOLDOWN: Dict[str, float] = {}
+_COOLDOWN_S = {"missing": 24 * 3600, "quota": 3600, "overloaded": 300}
+
+
+def _penalize(model: str, reason: str) -> None:
+    _COOLDOWN[model] = time.time() + _COOLDOWN_S.get(reason, 300)
+
+
+def _cooled_last(queue: List[str]) -> List[str]:
+    """Modèles en période d'écart renvoyés en fin de file (ordre conservé)."""
+    now = time.time()
+    fresh = [m for m in queue if _COOLDOWN.get(m, 0) <= now]
+    return fresh + [m for m in queue if m not in fresh]
+
+
+def _version_key(name: str):
+    """Clé de tri : gemini-3.6-flash > gemini-3.5-flash > gemini-2.5-pro…"""
+    import re as _re
+    nums = [int(x) for x in _re.findall(r"\d+", name)[:2]]
+    return (nums + [0, 0])[:2] + [0 if "lite" in name else 1]
 
 
 class GeminiClient:
@@ -168,12 +243,30 @@ class GeminiClient:
         self.usage["total_tokens"]      += getattr(u, "total_tokens", 0) or 0
 
     def _build_model_queue(self, preferred: str) -> List[str]:
+        """
+        File : modèle préféré (s'il existe), préférences connues disponibles,
+        puis les autres Flash/Pro stables, versions récentes d'abord.
+        """
+        available = _available_models()
+        if not available:
+            queue = [preferred] + [m for m in _OFFLINE_QUEUE if m != preferred]
+            logger.info("[gemini] File de modèles (repli, %d): %s", len(queue), queue)
+            return queue
         queue: List[str] = []
-        if preferred not in _MODEL_PRIORITY:
+        if preferred in available:
             queue.append(preferred)
+        elif preferred:
+            logger.warning("[gemini] Modèle %s non proposé par l'API — ignoré", preferred)
         for m in _MODEL_PRIORITY:
-            if m not in queue:
+            if m in available and m not in queue:
                 queue.append(m)
+        # Autres modèles stables (hors preview), plus récents d'abord
+        extras = sorted((m for m in available if m not in queue and m not in _LAST_RESORT
+                         and "preview" not in m and "latest" not in m),
+                        key=_version_key, reverse=True)
+        queue.extend(extras[:6])
+        queue.extend(m for m in _LAST_RESORT if m in available and m not in queue)
+        queue = _cooled_last(queue)
         logger.info("[gemini] File de modèles (%d): %s", len(queue), queue)
         return queue
 
@@ -224,7 +317,8 @@ class GeminiClient:
                 "model":       current,
                 "messages":    messages,
                 "temperature": temperature,
-                "max_tokens":  4096 if not tools else 2048,
+                # Réponse finale : findings + tool_reviews (un avis par outil, ~40 outils)
+                "max_tokens":  _MAX_OUT if not tools else _MAX_OUT_TOOLS,
             }
             if tools:
                 kwargs["tools"]       = tools
@@ -239,12 +333,14 @@ class GeminiClient:
                 err_str = str(e)
 
                 if _is_payload_too_large(err_str):
+                    pass   # dépend de la requête, pas du modèle : pas d'écart
                     logger.warning("[gemini] Payload trop grand sur %s — switch modèle", current)
                     if not self._switch_to_next_model():
                         raise RuntimeError("[gemini] Tous les modèles dépassés (payload)") from e
 
                 elif _is_rate_limit(err_str):
                     if _is_quota_exhausted(err_str):
+                        _penalize(current, "quota")
                         if not self._switch_to_next_model():
                             raise RuntimeError("[gemini] Tous les modèles quota épuisés") from e
                     else:
@@ -265,8 +361,15 @@ class GeminiClient:
 
                 elif _is_model_unavailable(err_str):
                     logger.warning("[gemini] Modèle %s indisponible (404/renommé) — switch modèle", current)
+                    _penalize(current, "missing")
                     if not self._switch_to_next_model():
                         raise RuntimeError("[gemini] Tous les modèles indisponibles") from e
+
+                elif _is_overloaded(err_str):
+                    logger.warning("[gemini] Modèle %s saturé (503) — switch modèle", current)
+                    _penalize(current, "overloaded")
+                    if not self._switch_to_next_model():
+                        raise RuntimeError("[gemini] Tous les modèles saturés") from e
 
                 else:
                     raise

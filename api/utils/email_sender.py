@@ -7,6 +7,7 @@ import string
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from datetime import datetime, timedelta
 import os
 
@@ -16,6 +17,49 @@ EMAIL_SENDER = os.getenv('SMTP_USERNAME')
 EMAIL_PASSWORD = os.getenv('SMTP_PASSWORD')
 EMAIL_HOST = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('SMTP_PORT', 587))
+
+# ── Charte ReconIA ───────────────────────────────────────────────────────────
+# Le logo est intégré au message (image « inline » référencée par cid:) et
+# non chargé depuis le site : il s'affiche sans téléchargement externe et ne
+# sert pas de pixel de suivi d'ouverture. Ce n'est pas une pièce jointe
+# (Content-Disposition: inline) — la décision D1 (aucun rapport joint) tient.
+_BRAND_LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                'static', 'brand', 'reconia-logo-email.png')
+_BRAND_LOGO_CID = 'reconia-logo'
+_BRAND_HEADER_HTML = (
+    f'<img src="cid:{_BRAND_LOGO_CID}" width="180" alt="ReconIA — De la donnée à la décision" '
+    'style="display:block;margin:0 auto;border:0;outline:none;width:180px;max-width:60%;height:auto;">'
+)
+_BRAND_BAR_HTML = '<td style="background:linear-gradient(90deg,#0A1F44,#0B5BD3,#00C8F0);height:4px;line-height:4px;font-size:0;">&nbsp;</td>'
+
+
+def _brand_logo_bytes():
+    try:
+        with open(_BRAND_LOGO_PATH, 'rb') as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _build_message(text: str, html: str) -> MIMEMultipart:
+    """
+    Message multipart aux couleurs de ReconIA : texte + HTML, et le logo en
+    image inline si le fichier est présent (sinon le HTML affiche son texte
+    alternatif). Les en-têtes From/To/Subject sont posés par l'appelant.
+    """
+    alternative = MIMEMultipart('alternative')
+    alternative.attach(MIMEText(text, 'plain', 'utf-8'))
+    alternative.attach(MIMEText(html, 'html', 'utf-8'))
+    logo = _brand_logo_bytes()
+    if logo is None:
+        return alternative
+    related = MIMEMultipart('related')
+    related.attach(alternative)
+    image = MIMEImage(logo, 'png')
+    image.add_header('Content-ID', f'<{_BRAND_LOGO_CID}>')
+    image.add_header('Content-Disposition', 'inline', filename='reconia-logo.png')
+    related.attach(image)
+    return related
 
 
 def generate_code() -> str:
@@ -30,7 +74,7 @@ def _build_html_email(code: str) -> str:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vérification Recon IA</title>
+  <title>Vérification ReconIA</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f0f9ff;font-family:'Segoe UI',Arial,sans-serif;">
 
@@ -40,26 +84,13 @@ def _build_html_email(code: str) -> str:
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
 
-          <!-- Header / Logo -->
+          <!-- En-tête : logo ReconIA (image inline cid:) -->
           <tr>
-            <td align="center" style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:16px 16px 0 0;padding:32px 40px;">
-              <table cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td valign="middle" style="padding-right:14px;">
-                    <!-- Logo icon -->
-                    <div style="width:52px;height:52px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:12px;display:inline-block;text-align:center;line-height:52px;">
-                      <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkwyIDdMMTIgMTJMMjIgN0wxMiAyWiIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0iTTIgMTdIMjIiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0iTTIgMTJMMTIgMTdMMjIgMTIiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0iTTEyIDE3VjIyIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjwvc3ZnPg==" width="26" height="26" alt="Recon IA" style="margin-top:13px;display:block;">
-                    </div>
-                  </td>
-                  <td valign="middle">
-                    <span style="font-size:26px;font-weight:700;color:#f1f5f9;letter-spacing:-0.5px;">
-                      Recon <span style="color:#818cf8;">IA</span>
-                    </span>
-                  </td>
-                </tr>
-              </table>
+            <td align="center" style="background:#ffffff;border:1px solid #e2e8f0;border-bottom:none;border-radius:16px 16px 0 0;padding:28px 40px 22px;">
+              {_BRAND_HEADER_HTML}
             </td>
           </tr>
+          <tr>{_BRAND_BAR_HTML}</tr>
 
           <!-- Body card -->
           <tr>
@@ -67,25 +98,25 @@ def _build_html_email(code: str) -> str:
 
               <!-- Badge -->
               <p style="margin:0 0 28px;text-align:center;">
-                <span style="display:inline-block;background:rgba(99,102,241,0.08);color:#6366f1;font-size:13px;font-weight:600;padding:6px 16px;border-radius:100px;border:1px solid rgba(99,102,241,0.2);letter-spacing:0.5px;">
+                <span style="display:inline-block;background:rgba(11,91,211,0.08);color:#0B5BD3;font-size:13px;font-weight:600;padding:6px 16px;border-radius:100px;border:1px solid rgba(11,91,211,0.2);letter-spacing:0.5px;">
                   VERIFICATION D'IDENTITE
                 </span>
               </p>
 
-              <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0f172a;text-align:center;line-height:1.3;">
+              <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0A1F44;text-align:center;line-height:1.3;">
                 Confirmez votre adresse email
               </h1>
               <p style="margin:0 0 36px;font-size:15px;color:#64748b;text-align:center;line-height:1.6;">
-                Utilisez le code ci-dessous pour finaliser votre demande de reconnaissance sur la plateforme Recon IA.
+                Utilisez le code ci-dessous pour finaliser votre demande de reconnaissance sur la plateforme ReconIA.
               </p>
 
               <!-- OTP Code block -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:36px;">
                 <tr>
                   <td align="center">
-                    <div style="display:inline-block;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:2px solid rgba(99,102,241,0.25);border-radius:16px;padding:28px 48px;text-align:center;">
+                    <div style="display:inline-block;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:2px solid rgba(11,91,211,0.25);border-radius:16px;padding:28px 48px;text-align:center;">
                       <p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:2px;text-transform:uppercase;">Votre code de vérification</p>
-                      <p style="margin:0;font-size:42px;font-weight:800;color:#0f172a;letter-spacing:14px;font-family:'Courier New',monospace;">{code}</p>
+                      <p style="margin:0;font-size:42px;font-weight:800;color:#0A1F44;letter-spacing:14px;font-family:'Courier New',monospace;">{code}</p>
                     </div>
                   </td>
                 </tr>
@@ -128,14 +159,14 @@ def _build_html_email(code: str) -> str:
 
           <!-- Divider accent -->
           <tr>
-            <td style="background:linear-gradient(90deg,#6366f1,#8b5cf6,#22d3ee);height:3px;"></td>
+            <td style="background:linear-gradient(90deg,#0B5BD3,#1677F2,#00C8F0);height:3px;"></td>
           </tr>
 
           <!-- Footer -->
           <tr>
             <td style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:24px 40px;text-align:center;">
               <p style="margin:0 0 6px;font-size:13px;color:#94a3b8;line-height:1.5;">
-                &copy; 2026 <strong style="color:#6366f1;">Recon IA</strong> &mdash; Plateforme de Reconnaissance Passive
+                &copy; 2026 <strong style="color:#0B5BD3;">ReconIA</strong> &mdash; De la donnée à la décision
               </p>
               <p style="margin:0;font-size:12px;color:#cbd5e1;">
                 <span style="font-family:'Courier New',monospace;">idachallenge.bj</span> &mdash; Tous droits réservés
@@ -160,13 +191,8 @@ def send_verification_email(email: str, code: str) -> bool:
     if not all([sender, password, EMAIL_HOST]):
         raise ValueError("Variables d'environnement SMTP manquantes : SMTP_USERNAME, SMTP_PASSWORD, SMTP_SERVER")
 
-    msg = MIMEMultipart('alternative')
-    msg['From'] = f"Recon IA <{sender}>"
-    msg['To'] = email
-    msg['Subject'] = "Votre code de vérification Recon IA"
-
     # Fallback texte brut
-    text_body = f"""Recon IA — Vérification d'identité
+    text_body = f"""ReconIA — Vérification d'identité
 
 Votre code de vérification est : {code}
 
@@ -174,10 +200,12 @@ Ce code expire dans 10 minutes.
 
 Si vous n'avez pas initié cette demande, ignorez cet email.
 
-© 2026 Recon IA — idachallenge.bj
+© 2026 ReconIA — idachallenge.bj
 """
-    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-    msg.attach(MIMEText(_build_html_email(code), 'html', 'utf-8'))
+    msg = _build_message(text_body, _build_html_email(code))
+    msg['From'] = f"ReconIA <{sender}>"
+    msg['To'] = email
+    msg['Subject'] = "Votre code de vérification ReconIA"
 
     try:
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
@@ -239,7 +267,7 @@ def send_results_ready_email(
 
     link_html = (
         f'<p style="margin:0 0 24px;text-align:center;">'
-        f'<a href="{url_html}" style="display:inline-block;background:#0f172a;color:#9fef00;'
+        f'<a href="{url_html}" style="display:inline-block;background:#0A1F44;color:#00C8F0;'
         f'font-weight:700;text-decoration:none;padding:12px 28px;border-radius:8px;">'
         f'Voir le résultat</a></p>'
     ) if url else ''
@@ -248,24 +276,25 @@ def send_results_ready_email(
     html = f"""<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Votre rapport Recon IA est prêt</title></head>
+<title>Votre rapport ReconIA est prêt</title></head>
 <body style="margin:0;padding:0;background:#f0f9ff;font-family:'Segoe UI',Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f9ff;padding:36px 0;">
 <tr><td align="center">
 <table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%;">
-  <tr><td style="background:#0f172a;border-radius:16px 16px 0 0;padding:28px 40px;text-align:center;">
-    <p style="margin:0;font-size:24px;font-weight:700;color:#f1f5f9;">Recon <span style="color:#9fef00;">IA</span></p>
-    <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;letter-spacing:1px;text-transform:uppercase;">Votre rapport est prêt</p>
+  <tr><td style="background:#ffffff;border:1px solid #e2e8f0;border-bottom:none;border-radius:16px 16px 0 0;padding:28px 40px 18px;text-align:center;">
+    {_BRAND_HEADER_HTML}
+    <p style="margin:14px 0 0;font-size:12px;color:#4A5872;letter-spacing:1px;text-transform:uppercase;">Votre rapport est prêt</p>
   </td></tr>
+  <tr>{_BRAND_BAR_HTML}</tr>
   <tr><td style="background:#ffffff;border:1px solid #e2e8f0;border-top:none;padding:36px 44px;">
     <p style="margin:0 0 20px;font-size:15px;color:#1e293b;">Bonjour <strong>{firstname} {lastname}</strong>,</p>
     <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.7;">
-      L'analyse de reconnaissance passive de <strong style="color:#0f172a;">{domain}</strong> est terminée.
+      L'analyse de reconnaissance passive de <strong style="color:#0A1F44;">{domain}</strong> est terminée.
       Pour des raisons de sécurité, le rapport n'est pas joint à ce message : il est chiffré
       et consultable uniquement avec le code ci-dessous.
     </p>
     <p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:1px;">Votre code d'accès</p>
-    <p style="margin:0 0 24px;padding:16px;background:#0f172a;color:#9fef00;border-radius:8px;
+    <p style="margin:0 0 24px;padding:16px;background:#0A1F44;color:#00C8F0;border-radius:8px;
               font-family:'Courier New',monospace;font-size:15px;word-break:break-all;text-align:center;">{code}</p>
     {link_html}
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;border:1px solid #e2e8f0;border-radius:10px;">
@@ -284,13 +313,13 @@ def send_results_ready_email(
     </p>
   </td></tr>
   <tr><td style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:18px 40px;text-align:center;">
-    <p style="margin:0;font-size:12px;color:#94a3b8;">&copy; 2026 Recon IA &mdash; Reconnaissance passive OSINT</p>
+    <p style="margin:0;font-size:12px;color:#94a3b8;">&copy; 2026 <strong style="color:#0B5BD3;">ReconIA</strong> &mdash; De la donnée à la décision</p>
   </td></tr>
 </table>
 </td></tr></table>
 </body></html>"""
 
-    text = f"""Recon IA — Votre rapport est prêt
+    text = f"""ReconIA — Votre rapport est prêt
 
 Bonjour {firstname} {lastname},
 
@@ -307,12 +336,11 @@ Conservez ce code et ne le partagez pas : toute personne qui le détient peut li
 Nous ne le conservons pas. S'il est perdu, le rapport ne pourra pas être récupéré.
 """
 
-    msg = MIMEMultipart('alternative')
-    msg['From']    = f'Recon IA <{sender}>'
+    msg = _build_message(text, html)
+    msg['From']    = f'ReconIA <{sender}>'
     msg['To']      = to_email
-    msg['Subject'] = f'[Recon IA] Votre rapport pour {domain} est prêt'
-    msg.attach(MIMEText(text, 'plain', 'utf-8'))
-    msg.attach(MIMEText(html, 'html', 'utf-8'))
+    msg['Subject'] = f'[ReconIA] Votre rapport pour {domain} est prêt'
+
 
     try:
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
@@ -430,7 +458,7 @@ def send_error_notification(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Recon IA — Notification d'erreur</title>
+  <title>ReconIA — Notification d'erreur</title>
 </head>
 <body style="margin:0;padding:0;background:#f0f9ff;font-family:'Segoe UI',Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f9ff;padding:36px 0;">
@@ -439,15 +467,14 @@ def send_error_notification(
 
     <!-- Header -->
     <tr>
-      <td style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:16px 16px 0 0;padding:32px 40px;text-align:center;">
-        <p style="margin:0 0 4px;font-size:26px;font-weight:700;color:#f1f5f9;letter-spacing:-0.5px;">
-          Recon <span style="color:#00d4ff;">IA</span>
-        </p>
-        <p style="margin:0;font-size:12px;color:#64748b;letter-spacing:1px;text-transform:uppercase;">
+      <td style="background:#ffffff;border:1px solid #e2e8f0;border-bottom:none;border-radius:16px 16px 0 0;padding:28px 40px 18px;text-align:center;">
+        {_BRAND_HEADER_HTML}
+        <p style="margin:14px 0 0;font-size:12px;color:#4A5872;letter-spacing:1px;text-transform:uppercase;">
           Notification de processus
         </p>
       </td>
     </tr>
+    <tr>{_BRAND_BAR_HTML}</tr>
 
     <!-- Bande rouge erreur -->
     <tr>
@@ -463,7 +490,7 @@ def send_error_notification(
           <span style="display:inline-block;width:56px;height:56px;background:#fef2f2;border:2px solid #fecaca;border-radius:50%;font-size:28px;line-height:56px;text-align:center;">⚠️</span>
         </p>
 
-        <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0f172a;text-align:center;line-height:1.3;">
+        <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0A1F44;text-align:center;line-height:1.3;">
           {label}
         </h1>
         <p style="margin:0 0 28px;font-size:13px;color:#94a3b8;text-align:center;">
@@ -476,7 +503,7 @@ def send_error_notification(
         <p style="margin:0 0 28px;font-size:14px;color:#475569;line-height:1.7;">
           {description}<br>
           Votre demande concernant le domaine
-          <strong style="color:#0f172a;font-family:'Courier New',monospace;">{domain}</strong>
+          <strong style="color:#0A1F44;font-family:'Courier New',monospace;">{domain}</strong>
           n'a pas pu être traitée jusqu'à son terme.
         </p>
 
@@ -487,7 +514,7 @@ def send_error_notification(
         <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
           <tr>
             <td style="background:#f8fafc;padding:16px 20px;border-bottom:1px solid #e2e8f0;">
-              <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.5px;">
+              <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#0A1F44;text-transform:uppercase;letter-spacing:0.5px;">
                 &#9654; Option 1 — Relancer la demande
               </p>
               <p style="margin:0;font-size:13px;color:#475569;line-height:1.5;">
@@ -499,7 +526,7 @@ def send_error_notification(
           </tr>
           <tr>
             <td style="background:#ffffff;padding:16px 20px;">
-              <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.5px;">
+              <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#0A1F44;text-transform:uppercase;letter-spacing:0.5px;">
                 &#9654; Option 2 — Contacter l'administrateur
               </p>
               <p style="margin:0 0 10px;font-size:13px;color:#475569;line-height:1.5;">
@@ -508,7 +535,7 @@ def send_error_notification(
                 et le domaine concerné.
               </p>
               <a href="mailto:{_ADMIN_EMAIL}?subject=Recon%20IA%20%E2%80%94%20Erreur%20{ref_str}%20%E2%80%94%20{domain}"
-                 style="display:inline-block;background:#0f172a;color:#00d4ff;text-decoration:none;
+                 style="display:inline-block;background:#0A1F44;color:#00C8F0;text-decoration:none;
                         font-size:13px;font-weight:600;padding:10px 22px;border-radius:8px;letter-spacing:0.3px;">
                 ✉ Écrire à l'administrateur
               </a>
@@ -541,14 +568,14 @@ def send_error_notification(
 
     <!-- Bande dégradée -->
     <tr>
-      <td style="background:linear-gradient(90deg,#00d4ff,#7c3aed);height:3px;"></td>
+      <td style="background:linear-gradient(90deg,#00C8F0,#0B5BD3);height:3px;"></td>
     </tr>
 
     <!-- Footer -->
     <tr>
       <td style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 16px 16px;padding:22px 40px;text-align:center;">
         <p style="margin:0 0 4px;font-size:12px;color:#94a3b8;">
-          &copy; 2026 <strong style="color:#6366f1;">Recon IA</strong> &mdash; Plateforme de Reconnaissance Passive OSINT
+          &copy; 2026 <strong style="color:#0B5BD3;">ReconIA</strong> &mdash; De la donnée à la décision
         </p>
         <p style="margin:0;font-size:11px;color:#cbd5e1;font-family:'Courier New',monospace;">
           idachallenge.bj &mdash; Support : {_ADMIN_EMAIL}
@@ -562,7 +589,7 @@ def send_error_notification(
 </body>
 </html>"""
 
-    text = f"""Recon IA — Notification d'erreur
+    text = f"""ReconIA — Notification d'erreur
 
 Bonjour {firstname} {lastname},
 
@@ -588,17 +615,14 @@ En mentionnant la référence {ref_str} et le domaine {domain}.
 
 Aucune donnée n'a été perdue. Il vous suffit de relancer la demande.
 
-© 2026 Recon IA — idachallenge.bj
+© 2026 ReconIA — idachallenge.bj
 Support : {_ADMIN_EMAIL}
 """
 
-    msg = MIMEMultipart('alternative')
-    msg['From']    = f'Recon IA <{sender}>'
+    msg = _build_message(text, html)
+    msg['From']    = f'ReconIA <{sender}>'
     msg['To']      = to_email
-    msg['Subject'] = f'[Recon IA] Action requise — Erreur sur {domain} ({ref_str})'
-
-    msg.attach(MIMEText(text, 'plain', 'utf-8'))
-    msg.attach(MIMEText(html,  'html',  'utf-8'))
+    msg['Subject'] = f'[ReconIA] Action requise — Erreur sur {domain} ({ref_str})'
 
     try:
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
@@ -647,19 +671,21 @@ def send_monitoring_alert(to_email: str, domain: str, diff: dict, scanned_at: da
 
     summary_html = ''.join(f'<li>{_html.escape(s)}</li>' for s in summary) or '<li>—</li>'
     details_html = ''.join(
-        f'<p style="margin:12px 0 4px;font-weight:600;color:#0f172a;">{_html.escape(label)}</p>'
+        f'<p style="margin:12px 0 4px;font-weight:600;color:#0A1F44;">{_html.escape(label)}</p>'
         f'<p style="margin:0;font-family:\'Courier New\',monospace;font-size:12px;color:#334155;">'
         f'{"<br>".join(_html.escape(v) for v in values)}'
         f'{f"<br>… et {more} autre(s)" if more else ""}</p>'
         for label, values, more in details
     )
     html = f"""<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"><title>Surveillance Recon IA</title></head>
+<html lang="fr"><head><meta charset="UTF-8"><title>Surveillance ReconIA</title></head>
 <body style="margin:0;padding:24px;background:#f0f9ff;font-family:'Segoe UI',Arial,sans-serif;">
 <table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;">
-<tr><td style="background:#0f172a;border-radius:12px 12px 0 0;padding:20px 32px;">
-  <p style="margin:0;font-size:20px;font-weight:700;color:#f1f5f9;">Recon <span style="color:#9fef00;">IA</span> — Surveillance</p>
+<tr><td style="background:#ffffff;border-radius:12px 12px 0 0;padding:22px 32px 14px;text-align:center;">
+  {_BRAND_HEADER_HTML}
+  <p style="margin:12px 0 0;font-size:12px;color:#4A5872;letter-spacing:1px;text-transform:uppercase;">Surveillance</p>
 </td></tr>
+<tr>{_BRAND_BAR_HTML}</tr>
 <tr><td style="padding:24px 32px;">
   <p style="margin:0 0 12px;font-size:14px;color:#1e293b;">Changement significatif détecté sur <strong>{domain_html}</strong>
   (rescan passif du {when}).</p>
@@ -669,7 +695,7 @@ def send_monitoring_alert(to_email: str, domain: str, diff: dict, scanned_at: da
   Reconnaissance passive uniquement — aucune interaction intrusive avec la cible.</p>
 </td></tr></table></body></html>"""
 
-    text_lines = [f'Recon IA — Surveillance', '',
+    text_lines = [f'ReconIA — Surveillance', '',
                   f'Changement significatif détecté sur {domain_txt} (rescan passif du {when}).', '']
     text_lines += [f'- {s}' for s in summary] or ['- —']
     for label, values, more in details:
@@ -678,14 +704,12 @@ def send_monitoring_alert(to_email: str, domain: str, diff: dict, scanned_at: da
             text_lines.append(f'  … et {more} autre(s)')
     text_lines += ['', 'Détail complet : dashboard admin, onglet « Graphe & surveillance ».']
 
-    msg = MIMEMultipart('alternative')
-    msg['From']    = f'Recon IA <{sender}>'
+    msg = _build_message('\n'.join(text_lines), html)
+    msg['From']    = f'ReconIA <{sender}>'
     msg['To']      = to_email
     # Domaine filtré pour l'en-tête SMTP (déjà validé en amont, défense en profondeur)
     subject_domain = ''.join(c for c in domain_txt if c.isalnum() or c in '.-')
-    msg['Subject'] = f'[Recon IA] Surveillance — changement sur {subject_domain}'
-    msg.attach(MIMEText('\n'.join(text_lines), 'plain', 'utf-8'))
-    msg.attach(MIMEText(html, 'html', 'utf-8'))
+    msg['Subject'] = f'[ReconIA] Surveillance — changement sur {subject_domain}'
 
     try:
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:

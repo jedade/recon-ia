@@ -300,7 +300,7 @@ def download_navigator():
     findings = annotate_findings(analysis.get('findings') or [], {})
     layer = build_navigator_layer(findings, analysis.get('mitre_attack'), recon.domain or '')
     body = json.dumps(layer, ensure_ascii=False, indent=2)
-    filename = f'recon_ia_attack_navigator_{_safe_filename_part(recon.domain)}_{recon.id}.json'
+    filename = f'reconia_attack_navigator_{_safe_filename_part(recon.domain)}_{recon.id}.json'
     logger.info('[results] Layer Navigator — recon_id=%d techniques=%d', recon.id, len(layer['techniques']))
     return _attachment(body, 'application/json; charset=utf-8', filename)
 

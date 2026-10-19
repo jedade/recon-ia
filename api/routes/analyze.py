@@ -15,7 +15,7 @@ Analyse OSINT IA — exécution séquentielle optimisée selon les quotas :
   GEMINI (slot 1) — contexte 1M tokens, 1500 req/jour gratuit
     → Moteur principal si GEMINI_API_KEY configuré
     → max_rounds complets, rotation automatique sur quota épuisé
-    → Modèles : gemini-2.5-pro, gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash
+    → Modèles : lus sur l’API au démarrage (alias gemini-flash-latest par défaut)
 
   CEREBRAS (slot 2) — débit TPM très élevé, modèles llama-3.3-70b
     → Activé si DeepSeek/Gemini absents ou échoués
@@ -164,6 +164,13 @@ _OUTPUT_SCHEMA = {
     "strengths": [
         "string — bonnes pratiques déjà en place (SPF strict, HSTS activé...)"
     ],
+    "tool_reviews": [
+        {
+            "tool":    "string — clé d'un outil de tools_executed (status success)",
+            "verdict": "ras | constat | info — ras = rien à signaler, constat = a donné un finding, info = information utile sans risque",
+            "note":    "string — une phrase : ce que montre la donnée de cet outil (≤ 160 caractères)",
+        }
+    ],
     "immediate_actions": [
         {
             "priority": "integer — 1=urgent maintenant, 2=cette semaine, 3=ce mois",
@@ -227,6 +234,10 @@ Chaque finding DOIT être attribuable à l'outil OSINT qui a produit la donnée 
   grayhatwarfare, github_dorks) : leurs clés sont des `source_tool` valides.
 • `agent_pivots` : pivots passifs complémentaires choisis par l'agent ; un
   finding qui s'appuie dessus cite `agent_pivots` comme `source_tool`.
+• `tool_reviews` : OBLIGATOIRE — une entrée pour CHAQUE outil de `tools_executed`
+  dont le statut est success, même s'il n'a rien révélé (verdict « ras »). C'est
+  la preuve que toutes les données collectées ont été examinées ; un outil absent
+  de tool_reviews est compté comme NON examiné dans la couverture du rapport.
 • `comparative_context` : statistiques anonymes des scans passés, pour SITUER le
   domaine (« comme 65 % des domaines .bj… »). Ce n'est JAMAIS la preuve d'un
   finding ni une `evidence`.
@@ -1048,7 +1059,7 @@ def _run_backend(
 # (ex. un `security_score`, `grounding_check` ou `severity_check` « offert » par
 # le modèle) est ignoré : ces champs sont calculés par le serveur.
 _LLM_REPORT_KEYS = {
-    "domain", "risk_score", "risk_level", "executive_summary", "findings", "strengths",
+    "domain", "risk_score", "risk_level", "executive_summary", "findings", "strengths", "tool_reviews",
     "immediate_actions", "searches_performed", "model_used", "analyzed_at",
     "tokens_used", "_partial", "_resumed", "_reduce_degraded",
 }
@@ -1140,6 +1151,36 @@ def _annotate_attack(findings: List[Dict], signals: dict) -> List[Dict]:
     return result if isinstance(result, list) else findings
 
 
+_REVIEW_VERDICTS = {"ras", "constat", "info"}
+
+
+def _sanitize_tool_reviews(reviews: Any, scan: Dict) -> List[Dict[str, str]]:
+    """
+    Avis du modèle par outil : seulement des outils réellement présents dans
+    le scan avec un statut success (une clé inventée est écartée), verdict
+    dans une énumération fermée, note en texte borné, un avis par outil.
+    """
+    from utils.finding_sanitizer import clean_text
+    if not isinstance(reviews, list):
+        return []
+    known = {k for k, v in (scan or {}).items() if isinstance(v, dict) and v.get("status") == "success"}
+    out, seen = [], set()
+    for r in reviews[:120]:
+        if not isinstance(r, dict):
+            continue
+        tool = str(r.get("tool") or "").strip()
+        if tool not in known or tool in seen:
+            continue
+        verdict = str(r.get("verdict") or "").strip().lower()
+        out.append({
+            "tool": tool,
+            "verdict": verdict if verdict in _REVIEW_VERDICTS else "info",
+            "note": clean_text(r.get("note"), 200) or "",
+        })
+        seen.add(tool)
+    return out
+
+
 def _postprocess_report(report: dict, signals: dict, ctx: Dict[str, Any], used_backend: Optional[str]) -> dict:
     """
     Après le LLM : validation (sanitizer + B6), sévérité déterministe (B5),
@@ -1173,6 +1214,7 @@ def _postprocess_report(report: dict, signals: dict, ctx: Dict[str, Any], used_b
     ensure_unique_ids(findings)
     report["findings"]  = findings
     report["strengths"] = sanitize_strengths(report.get("strengths"))
+    report["tool_reviews"] = _sanitize_tool_reviews(report.get("tool_reviews"), scan)
     report["executive_summary"] = clean_text(report.get("executive_summary"), 5000)
     actions = []
     for a in (report.get("immediate_actions") or [])[:20] if isinstance(report.get("immediate_actions"), list) else []:
@@ -1225,7 +1267,10 @@ def _postprocess_report(report: dict, signals: dict, ctx: Dict[str, Any], used_b
     # ── Contrôle de couverture — voir utils/coverage_check.py ────────────────
     # Question distincte du grounding check : les données collectées ont-elles
     # ÉTÉ EXAMINÉES (pas seulement : les findings produits sont-ils exacts) ?
-    report["coverage_check"] = compute_coverage_check(report, scan, signals)
+    report["coverage_check"] = compute_coverage_check(
+        report, scan, signals,
+        rule_examined=(ctx["observations"].get("_examined_tools") or {}).get("tools") or [],
+    )
     report["coverage_check"].update({
         "rag_queries":                  ctx["rag_stats"].get("queries", 0) + ref_stats["finding_queries"],
         "rag_filtered_by_collection":   ctx["rag_stats"].get("filtered_by_collection"),

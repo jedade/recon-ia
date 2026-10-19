@@ -33,15 +33,36 @@ ws.addEventListener('message', (m) => {
 function send(method, params = {}) { return new Promise((res) => { const n = ++seq; pending.set(n, res); ws.send(JSON.stringify({ id: n, method, params })); }); }
 const evaluate = async (e) => (await send('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true })).result?.result?.value;
 async function shot(name) {
+  if (!(await noOverflow(name))) problems.push('débordement horizontal : ' + name);
   const { result } = await send('Page.getLayoutMetrics');
   const h = Math.min(Math.ceil(result.cssContentSize.height), 4000);
-  const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: 1440, height: h, scale: 1 } });
+  const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: VW, height: h, scale: 1 } });
   writeFileSync(join(OUT, name), Buffer.from(r.result.data, 'base64'));
 }
 const results = [];
 const check = (name, ok, detail) => { results.push(!!ok); console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ' — ' + detail : ''}`); };
 
 await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable');
+// WIDTH=375|768… : largeur d'écran émulée (tactile sous 900 px)
+const VW = Number(process.env.WIDTH || 1440);
+await send('Emulation.setDeviceMetricsOverride', { width: VW, height: VW < 900 ? 844 : 900, deviceScaleFactor: 1, mobile: VW < 900 });
+const overflowChecks = [];
+async function noOverflow(label) {
+  const r = await evaluate(`(() => { const vw = document.documentElement.clientWidth;
+    const wide = [...document.querySelectorAll("body *")].filter(e => { const b = e.getBoundingClientRect();
+      return b.width > 0 && b.right > vw + 1 && !e.closest(".table-wrap, .dash-tabs"); })
+      .slice(0, 5).map(e => e.tagName.toLowerCase() + (e.id ? "#" + e.id : "") + "." + String(e.className).split(" ")[0] + " " + Math.round(e.getBoundingClientRect().right));
+    return { w: document.documentElement.scrollWidth, vw, wide }; })()`);
+  overflowChecks.push(`${label} ${r.w}/${r.vw}`);
+  if (r.w > r.vw + 1) problems.push(`${label} : ${r.wide.join(", ")}`);
+  return r.w <= r.vw + 1;
+}
+// THEME=light|dark : thème imposé avant le premier rendu (clé de theme.js)
+if (process.env.THEME) {
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `try { localStorage.setItem('reconia.theme', ${JSON.stringify(process.env.THEME)}); } catch (e) {}`,
+  });
+}
 await send('Page.navigate', { url: `${SITE}/dashboard.html` });
 // Attendre la fin du chargement : les feuilles de style externes (polices,
 // icônes) retardent l'exécution du script ; soumettre avant ferait partir le

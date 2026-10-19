@@ -325,7 +325,7 @@ class TestNavigatorLayer:
         assert layer["versions"]["layer"] == "4.5"
         assert layer["domain"] == "enterprise-attack"
         assert layer["versions"]["attack"].isdigit()
-        assert layer["name"] == "Recon-IA — example.bj"
+        assert layer["name"] == "ReconIA — example.bj"
         for key in ("filters", "layout", "gradient", "legendItems", "techniques", "sorting"):
             assert key in layer
         json.loads(json.dumps(layer))   # sérialisable
@@ -377,7 +377,7 @@ class TestNavigatorLayer:
 
     def test_empty_layer(self):
         layer = build_navigator_layer([], None, "")
-        assert layer["techniques"] == [] and layer["name"] == "Recon-IA"
+        assert layer["techniques"] == [] and layer["name"] == "ReconIA"
 
 
 # ──────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voir le résultat — Recon IA</title>
+    <title>Voir le résultat — ReconIA</title>
     <!-- Page de consultation par code d'accès (plan d'action, phase 2).
          CSP stricte : aucun script ni style inline (tout est dans
          result.js / result.css), car la page affiche des données
@@ -26,12 +26,21 @@
     <meta name="referrer" content="no-referrer">
     <meta name="robots" content="noindex, nofollow">
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Mono&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32.png">
+    <link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png">
+    <meta name="theme-color" content="#0A1F44">
+    <script src="theme.js"></script>
     <link rel="stylesheet" href="result.css">
 </head>
 <body>
     <header class="topbar">
-        <a class="brand" href="index.html">Recon <span>IA</span></a>
+        <a class="brand" href="index.html" aria-label="ReconIA — accueil">
+            <img src="assets/brand/reconia-mark-160.png" alt="" width="34" height="29">
+            <span class="brand-name">Recon<span>IA</span></span>
+            <span class="brand-tag">De la donnée à la décision</span>
+        </a>
         <nav class="topbar-actions">
             <button type="button" class="ghost" id="theme-toggle" aria-label="Changer de thème">◐</button>
             <button type="button" class="ghost hidden" id="logout-btn">Fermer la session</button>
@@ -41,6 +50,8 @@
     <main id="app">
         <!-- Étape 1 : saisie du code -->
         <section id="access-view" class="access">
+            <img class="access-logo access-logo-light" src="assets/brand/reconia-logo-600.png" alt="ReconIA — De la donnée à la décision" width="220" height="186">
+            <img class="access-logo access-logo-mark access-logo-dark" src="assets/brand/reconia-mark.png" alt="ReconIA" width="96" height="81">
             <h1>Voir le résultat</h1>
             <p class="muted">
                 Saisissez le code d'accès reçu par email à la fin de l'analyse.
@@ -80,7 +91,12 @@
         </form>
     </dialog>
 
+    <footer class="site-footer">
+        <strong>ReconIA</strong> — Veille<span class="sep">|</span>Analyse<span class="sep">|</span>Intelligence
+    </footer>
+
     <script src="config.js"></script>
+    <script src="result-visuals.js"></script>
     <script src="result.js"></script>
 </body>
 </html>

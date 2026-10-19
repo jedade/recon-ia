@@ -36,7 +36,8 @@ docker image inspect recon-ia-api-test >/dev/null 2>&1 || \
     docker build -f "$ROOT_D/api/Dockerfile.test" -t recon-ia-api-test "$ROOT_D/api"
 
 mkdir -p "$WORK/web"
-cp "$ROOT/web/result.html" "$ROOT/web/result.css" "$ROOT/web/result.js" "$WORK/web/"
+cp "$ROOT/web/result.html" "$ROOT/web/result.css" "$ROOT/web/result.js" "$ROOT/web/theme.js" "$ROOT/web/result-visuals.js" "$ROOT/web/favicon.ico" "$WORK/web/"
+mkdir -p "$WORK/web/assets" && cp -r "$ROOT/web/assets/brand" "$ROOT/web/assets/geo" "$WORK/web/assets/"
 echo 'window.RECON_IA_CONFIG = { API_BASE: "http://localhost:18080", TURNSTILE_SITE_KEY: "" };' > "$WORK/web/config.js"
 cp "$ROOT/scripts/e2e/demo_server.py" "$WORK/"
 

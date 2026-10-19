@@ -50,9 +50,9 @@ graph_bp = Blueprint('graph', __name__)
 
 # Mention portée par tout export d'hôtes vivants
 LIVE_HOSTS_NOTICE = (
-    "Export issu d'une reconnaissance PASSIVE (Recon-IA) : aucune de ces cibles n'a "
+    "Export issu d'une reconnaissance PASSIVE (ReconIA) : aucune de ces cibles n'a "
     "été sondée activement. Toute phase active (scan de ports, test d'intrusion) "
-    "menée à partir de cette liste se fait HORS de Recon-IA et exige une "
+    "menée à partir de cette liste se fait HORS de ReconIA et exige une "
     "autorisation écrite préalable du propriétaire des systèmes, dans le périmètre "
     "convenu. Les observations peuvent être périmées : vérifier avant usage."
 )
@@ -185,11 +185,11 @@ def export_live_hosts():
     if fmt == 'json':
         body = json.dumps({
             'notice': LIVE_HOSTS_NOTICE, 'domain': domain, 'generated_at': generated_at,
-            'max_age_days': max_age, 'source': 'recon-ia passive entity graph',
+            'max_age_days': max_age, 'source': "ReconIA — graphe d'entités passif",
             'host_count': len(hosts), 'hosts': hosts,
         }, ensure_ascii=False, indent=2)
         response = Response(body, mimetype='application/json; charset=utf-8')
-        filename = f'recon_ia_hotes_vivants_{safe_domain}.json'
+        filename = f'reconia_hotes_vivants_{safe_domain}.json'
     else:
         buffer = io.StringIO()
         buffer.write('# ' + LIVE_HOSTS_NOTICE + '\n')
@@ -202,7 +202,7 @@ def export_live_hosts():
                     host['host'], host['type'], ip['ip'], ' '.join(str(p) for p in ip['ports']),
                     ' '.join(ip['sources']), host['last_seen'])])
         response = Response('﻿' + buffer.getvalue(), mimetype='text/csv; charset=utf-8')
-        filename = f'recon_ia_hotes_vivants_{safe_domain}.csv'
+        filename = f'reconia_hotes_vivants_{safe_domain}.csv'
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     response.headers['X-Recon-IA-Notice'] = 'passive-only; active testing requires written authorization'
     return response

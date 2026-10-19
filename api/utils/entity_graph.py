@@ -291,6 +291,47 @@ def _host_key(col: _Collector, host: str, root: str):
     return col.entity('domain' if host == root else 'subdomain', host)
 
 
+def _enumerated_subdomains(raw: dict, root: str) -> list:
+    """
+    Sous-domaines énumérés (union de pass_recon puis outils individuels),
+    normalisés, dédoublonnés et TRIÉS : [(hôte, premier outil qui l'a vu)].
+    """
+    seen = {}
+    sources = []
+    all_subs = raw.get('all_subdomains')
+    if isinstance(all_subs, dict):
+        sources.append(('all_subdomains', _as_list(all_subs.get('data'))))
+    for key in _SUBDOMAIN_TOOLS:
+        data = tool_data(raw, key)
+        if isinstance(data, list):
+            sources.append((key, data))
+        elif isinstance(data, dict):
+            sources.append((key, _as_list(data.get('subdomains'))))
+    for tool, values in sources:
+        for value in values:
+            host = norm_hostname(value, root)
+            if host and host != root and host not in seen:
+                seen[host] = tool
+    return sorted(seen.items())
+
+
+def subdomain_names(domain, raw_results) -> set:
+    """
+    TOUS les sous-domaines observés d'un scan (énumérés et résolus), sans le
+    plafond du graphe : base du différentiel entre deux scans
+    (utils/scan_diff.py), qui doit comparer des ensembles complets.
+    """
+    root = norm_hostname(domain) if isinstance(domain, str) else None
+    if not root or not isinstance(raw_results, dict):
+        return set()
+    names = {host for host, _ in _enumerated_subdomains(raw_results, root)}
+    for host, _ips in _iter_host_ips(raw_results):
+        h = norm_hostname(host, root)
+        if h and h != root:
+            names.add(h)
+    return names
+
+
 def extract_graph(domain, raw_results) -> dict:
     """
     Entités et relations d'un scan, normalisées et sans PII.
@@ -305,24 +346,15 @@ def extract_graph(domain, raw_results) -> dict:
     raw = raw_results
     dom = col.entity('domain', root)
 
-    # Sous-domaines : union calculée par pass_recon, puis outils individuels
-    subs = []
-    all_subs = raw.get('all_subdomains')
-    if isinstance(all_subs, dict):
-        subs.extend(('all_subdomains', s) for s in _as_list(all_subs.get('data')))
-    for key in _SUBDOMAIN_TOOLS:
-        data = tool_data(raw, key)
-        if isinstance(data, list):
-            subs.extend((key, s) for s in data)
-        elif isinstance(data, dict):
-            subs.extend((key, s) for s in _as_list(data.get('subdomains')))
+    # Sous-domaines énumérés : ordre trié, donc sélection identique d'un scan
+    # à l'autre quand le plafond s'applique (sinon le graphe changerait sans
+    # que la cible change).
     enumerated = 0
-    for tool, value in subs:
-        host = norm_hostname(value, root)
-        if host and host != root and enumerated < MAX_ENUMERATED_SUBDOMAINS:
-            if ('subdomain', host) not in col.entities:
-                enumerated += 1
-            col.relation(dom, col.entity('subdomain', host), 'has_subdomain', tool)
+    for host, tool in _enumerated_subdomains(raw, root):
+        if enumerated >= MAX_ENUMERATED_SUBDOMAINS:
+            break
+        enumerated += 1
+        col.relation(dom, col.entity('subdomain', host), 'has_subdomain', tool)
 
     # Résolution du domaine racine
     dns = tool_data(raw, 'dns_records')

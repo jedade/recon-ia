@@ -183,12 +183,19 @@ Il n'y a **plus** de `api/main.py`, `api/main.py.back`, `api/requirement`,
 
 ### `web/`
 
-- `index.html` — page publique : `POST /recon` (avec jeton Turnstile si
-  `TURNSTILE_SITE_KEY` est configurée) puis `POST /verify_email`, tous deux
-  sur l'API — plus aucun appel à n8n depuis le navigateur (CSS/JS inlinés).
+- `index.html` + `landing.css` + `landing.js` — page publique (réécrite le
+  2026-10-19 aux couleurs de la charte, voir « Charte graphique » ci-dessous) :
+  `POST /recon` (avec jeton Turnstile si `TURNSTILE_SITE_KEY` est configurée)
+  puis `POST /verify_email`, tous deux sur l'API — aucun appel à n8n depuis le
+  navigateur. **CSP stricte, sans `unsafe-inline`** : ne pas réintroduire de
+  `<script>`/`style=""` en ligne ; rendu des messages par `createElement`.
+  Les identifiants de champs (`first-name`, `last-name`, `domain-to-test`,
+  `contact-email`, `ownership-confirmation`, `main-form`,
+  `verification-form`, `verification-code`, `form-message`) sont utilisés par
+  `scripts/e2e/full_flow.mjs` : ne pas les renommer.
 - `result.html` + `result.css` + `result.js` — « Voir le résultat » (phase 2,
-  design inspiré de web-check : fond `#141d2b`, accent `#9fef00`, PT Mono,
-  cartes à ombre décalée, masonry, thème clair automatique ou bouton ◐) :
+  structure inspirée de web-check — cartes, masonry — aux couleurs de la
+  charte ReconIA, thème clair automatique ou bouton ◐) :
   saisie du code → `POST /results/access` → session en `sessionStorage`
   (jamais le code) → rendu de `GET /results/report` : jauge score/note,
   résumé, fiabilité (`grounding_check`/`coverage_check`), constats triés et
@@ -404,6 +411,115 @@ dans le détail d'un dossier scellé, bouton **« Voir le scan brut (cache) »**
 qui ouvre l'entrée du même domaine : c'est le moyen pour l'admin de voir les
 données collectées d'un dossier dont le rapport n'est lisible qu'avec le
 code du demandeur. Tests : `tests/test_cache_admin.py`.
+
+### Charte graphique ReconIA (2026-10-19)
+
+Logo officiel : symbole « R » (pixels, loupe, œil) et logo complet « ReconIA »
+avec le slogan **« De la donnée à la décision »** et **« Veille | Analyse |
+Intelligence »**. Couleurs : bleu marine `#0A1F44`, bleu roi `#0B5BD3`, bleu
+vif `#1677F2`, cyan `#00C8F0` (dégradé du logo). Titres **Montserrat**, texte
+**Inter**. Le nom s'écrit **ReconIA** (plus « Recon IA » ni « Recon-IA »).
+
+| Fichier | Usage |
+|---|---|
+| `docs/brand/reconia-*-source.png` | originaux fournis (fond blanc) |
+| `docs/brand/make_brand.py` | régénère les déclinaisons (fond rendu transparent par remplissage depuis les bords : les blancs intérieurs — œil, contre-formes — restent opaques) |
+| `web/assets/brand/reconia-mark*.png` | symbole seul : fonctionne sur fond clair **et** sombre |
+| `web/assets/brand/reconia-logo*.png` | logo complet : **fond clair uniquement** (texte marine) — sur fond sombre, symbole + nom en HTML |
+| `web/favicon.ico`, `web/assets/brand/favicon-32.png`, `icon-192/512.png`, `apple-touch-icon.png` | favicons (toutes les pages) |
+| `api/static/brand/` | logos du PDF (couverture claire + en-tête marine) et du mail (`reconia-logo-email.png`) |
+
+- **Mails** : logo intégré en image *inline* (`cid:reconia-logo`,
+  `Content-Disposition: inline`) par `email_sender._build_message` — pas
+  d'image distante (aucun pixel de suivi), et ce n'est pas une pièce jointe
+  (D1 respectée ; Mailpit le classe en « Inline », `Attachments` vide).
+  Fichier absent → mail sans image, jamais d'échec.
+- **PDF** : `pdf_generator._brand_image` ; fichier absent → nom en texte.
+- **Exports** : un CSV/JSON ne peut pas contenir d'image. Les fichiers sont
+  nommés `reconia_*`, l'export JSON porte `provenance.publisher` (nom,
+  slogan, `logo_url` déduite de `RESULTS_PAGE_URL`), le layer Navigator est
+  titré « ReconIA — domaine » avec le slogan en métadonnée.
+- **Thème clair / sombre sur toutes les pages** (accueil, résultat,
+  documentation, dashboard) : `web/theme.js`, chargé de façon synchrone dans
+  `<head>` avant les feuilles de style, pose `data-theme="light|dark"` sur
+  `<html>` avant le premier rendu (pas de flash) et la classe `js`. Choix
+  mémorisé sous `localStorage["reconia.theme"]` (même clé que `result.js`),
+  donc partagé entre les pages ; sans choix, le thème du système est suivi.
+  Tout bouton `[data-theme-toggle]` bascule. Les styles sombres s'écrivent
+  `:root[data-theme="dark"] …` (accueil, résultat) ou les jetons sont
+  redéfinis sous `:root[data-theme="light"]` (documentation, dashboard,
+  sombres par défaut). Dans la documentation, les blocs de code restent
+  sombres dans les deux thèmes (jetons redéfinis sur `.code-block, pre`).
+  Ne plus écrire de couleur en dur : utiliser les variables (`--text-mid`,
+  `--surface-solid`, `--input-bg`… dans le dashboard ; `--text-strong`,
+  `--tint`… dans la documentation).
+- **Animations** (accueil surtout) : entrée décalée du haut de page, aperçu
+  de rapport qui flotte avec un balayage façon radar, jauge animée
+  (`@property --p`), constats qui glissent, carrés « pixels » du logo qui
+  dérivent, compteurs (`data-count`), sections qui apparaissent au
+  défilement (`.reveal` → `.in`, posées par `landing.js` via
+  IntersectionObserver), reflet sur les boutons. Page de résultat : sections
+  en fondu, jauge qui se remplit (`pathLength=100`). Les styles qui masquent
+  avant animation n'agissent que sous `:root.js` (contenu visible sans JS)
+  et tout est neutralisé par `prefers-reduced-motion: reduce`.
+- **Visuels du résultat** (`web/result-visuals.js`, section « Vue
+  d'ensemble » insérée après le résumé) : donuts SVG (sévérités, couverture
+  de la collecte), barres par catégorie, **globe** façon web-check sur
+  `<canvas>` (projection orthographique, rotation d'arrivée vers le premier
+  serveur puis rotation lente, pause hors écran, redessiné au changement de
+  thème) placé d'après `ip_info.data.ips[].loc`, et **cartographie** SVG
+  (domaine → IP + hébergeur → sous-domaines actifs de `dns_mass`, 12 au
+  plus). Contours des terres : `web/assets/geo/land-110m.json` (Natural
+  Earth 1:110m, domaine public, via world-atlas@2.0.2, converti en anneaux
+  [lon, lat] ; copie pour le PDF dans `api/static/geo/`). Sans bibliothèque,
+  texte par `textContent`, styles par CSSOM (la CSP bloque `setAttribute
+  ('style')`, y compris sur le SVG).
+- **Couverture de l'analyse** (`coverage_check`) : un outil avec données
+  compte comme examiné s'il est cité par un constat ou un point fort, s'il a
+  un avis dans `tool_reviews` (nouveau champ du schéma : un avis par outil
+  `success`, verdict `ras|constat|info`, note ≤ 200 car., validé par
+  `analyze._sanitize_tool_reviews` — outils inconnus ou en échec écartés),
+  ou si une règle de sévérité a lu ses données (`detect_observations` →
+  `_examined_tools`). `model_coverage_pct` garde la part du modèle seul.
+  Avant : seules les citations comptaient (28,6 % constaté) ; mesuré après
+  sur example.com avec Gemini : 100 % (31/31). Plafonds de sortie des LLM
+  relevés à 8 192 / 4 096 tokens (`LLM_MAX_OUTPUT_TOKENS[_WITH_TOOLS]`) pour
+  ne pas tronquer le JSON. Le chemin Ollama (map-reduce) ne produit pas
+  encore de `tool_reviews` : sa couverture vient des constats et des règles.
+- **Cartes d'outils** : les objets imbriqués (`renderValue`, profondeur ≥ 1)
+  s'affichent empilés (`dl.kv-nested` : libellé au-dessus, filet à gauche)
+  — une grille dans la grille affichait une lettre par ligne dans les cartes
+  étroites (ex. `security_headers` → `content-security-policy`). Le test
+  e2e vérifie qu'aucune valeur n'est écrasée sous 60 px.
+- **PDF professionnel** : couverture sans score (identification, référence
+  `RIA-xxxxx`, classification), page « Sommaire » + « Périmètre et méthode »
+  + échelle de sévérité, **synthèse** avec jauge, chiffres clés, donuts et
+  barres, page « Exposition géographique et infrastructure » (carte du monde
+  équirectangulaire + tableau des lieux, cartographie). Graphiques vectoriels
+  dans `utils/pdf_visuals.py` (mêmes règles que la page). Les PDF déjà
+  scellés gardent leur ancienne mise en page (ils ne sont jamais régénérés).
+  Tests : `tests/test_pdf_visuals.py`.
+- **Responsivité** (vérifiée de 320 à 1440 px) : menu burger de l'accueil
+  sous 1 120 px (le menu complet ne tient pas à 1 024 px), colonnes de grille
+  en `min-width: 0`, Turnstile en format `compact` sous 380 px (le format
+  normal fait 300 px fixes), documentation avec `main { min-width: 0 }` (un
+  bloc de code élargissait la page à 1 024 px) et barre latérale qui se
+  referme au choix d'une section, dashboard avec en-tête réduit aux icônes,
+  onglets qui défilent sur une ligne et statistiques sur deux colonnes sous
+  420 px. Cibles tactiles ≥ 38–44 px sur mobile.
+- `scripts/e2e/page_check.mjs` teste 6 largeurs (320, 375, 414, 768, 1024,
+  1440 ; `VIEWPORTS=320,768` pour restreindre), signale texte < 11 px et
+  cibles tactiles < 32 px ; `WIDTH=375 node scripts/e2e/dashboard.mjs …`
+  rejoue le dashboard connecté à une largeur donnée (débordement vérifié à
+  chaque capture). Supprimer `profile-*` du dossier de sortie après une
+  modification : le profil Chrome garde la page en cache.
+- `scripts/e2e/page_check.mjs` vérifie aussi le bouton de thème (bascule,
+  mémorisation, même thème sur une autre page) et que tous les `.reveal`
+  finissent affichés ; `THEME=light|dark node scripts/e2e/dashboard.mjs …`
+  rejoue le test du dashboard dans un thème imposé.
+- Tests : `tests/test_branding.py` ; contrôle visuel des pages statiques
+  (débordement mobile, CSP, images cassées, thèmes clair/sombre) :
+  `node scripts/e2e/page_check.mjs <url> <dossier> <chrome> [nom]`.
 
 ### Phases 3 à 8 (2026-10-19) — vue d'ensemble
 
@@ -1503,7 +1619,7 @@ python3 -m pytest --cov=. --cov-report=term-missing
 pytest avec `--network none` : un test qui oublierait de simuler le réseau
 échoue au lieu de dépendre d'Internet. Marqueurs déclarés dans `pytest.ini` :
 `security` et `integration` (un test non marqué est un test unitaire). État
-au 2026-10-19 (après les phases 3 à 8) : **946 tests pytest verts, 11 ignorés**
+au 2026-10-19 (phases 3 à 8 + charte graphique + visuels) : **997 tests pytest verts, 11 ignorés**
 (305 `security`, 113 `integration`), et 27
 vérifications navigateur vertes (`scripts/e2e/run-result-page.sh` : API réelle
 avec un dossier scellé contenant du HTML piégé, Chrome headless piloté par le
@@ -1961,6 +2077,43 @@ unitaires, corrigés et couverts par `tests/test_phase_integration.py` :
 - **RAG toujours vide en local** : le modèle d'embeddings
   `nomic-embed-text:v1.5` n'était jamais téléchargé (`/api/embeddings` en
   404). `setup.sh` le télécharge maintenant à l'étape 5.
+- **Faux différentiel sur les gros domaines** (trouvé ensuite dans le
+  dashboard : « 1 995 sous-domaines disparus » pour example.com) : l'empreinte
+  d'un scan prenait ses sous-domaines dans le graphe, plafonné, donc chaque
+  scan en retenait un sous-ensemble différent. `scan_diff.extract_snapshot`
+  utilise désormais `entity_graph.subdomain_names` (ensemble complet), et la
+  sélection plafonnée du graphe est triée (identique d'un scan à l'autre).
+  Les empreintes déjà enregistrées avant ce correctif restent faussées
+  jusqu'au scan suivant.
+- **Workflow n8n en erreur « connection closed unexpectedly »** sur
+  « Launch Passive Recon » : l'API avait été reconstruite pendant un scan,
+  ce qui coupe toute requête en cours (le dossier reste ensuite bloqué
+  jusqu'au watchdog, 20 min). Les 5 nœuds HTTP de `recon-ia-main.json` ont
+  désormais `retryOnFail` (5 essais, 5 s d'écart : le maximum n8n, assez
+  pour un redémarrage de l'API). Sans risque de double envoi : l'étape
+  finale refuse un dossier déjà scellé (403). **Ne pas reconstruire `api`
+  pendant un pipeline** ; un dossier vérifié resté en échec se relance
+  avec `utils.pipeline_trigger.trigger_pipeline(id)` puis
+  `status='running'`, `set_step('queued')` (même séquence que
+  `/verify_email`).
+- **Gemini inutilisable avec une vraie clé** (2026-10-19) : les 4 modèles
+  codés en dur (`gemini-2.0-flash`, 1.5…) étaient retirés par Google (404).
+  `gemini_client` lit désormais la liste des modèles sur l'API au démarrage
+  (texte + `generateContent`, sans TTS/image/audio/preview), défaut
+  `gemini-flash-latest` (alias tenu à jour), puis versions numérotées les
+  plus récentes, `gemini-flash-lite-latest` en dernier. Bascule au modèle
+  suivant aussi sur 503 « high demand ». Un modèle refusé est écarté en fin
+  de file pour les analyses suivantes du même processus (`_COOLDOWN` : 24 h
+  si disparu, 1 h si quota épuisé, 5 min si saturé). Constaté avec la clé
+  gratuite : `flash-latest`, `pro-latest`, `gemini-4-argon` en 429 (quota),
+  3.7/3.8 en 503 ; analyse réelle d'example.com en **81 s** (contre 10–15 min
+  avec Ollama), score 80/B, 5 constats.
+- **Dossier en échec sur une synthèse Ollama illisible** : la phase REDUCE
+  de `qwen3:1.7b` a renvoyé un JSON invalide → « aucun backend n'a produit
+  de rapport », dossier `failed`, alors que les 6 sections MAP étaient
+  valides. Seule l'expiration déclenchait le repli. Désormais
+  `ollama_client._reduce_output_usable` valide la synthèse et, sinon, le même
+  repli s'applique (constats MAP, `_reduce_degraded: true`).
 
 Constat à garder en tête : sans clé cloud (`GEMINI_API_KEY`, `GROQ_API_KEY`…
 vides), toute l'analyse tombe sur `qwen3:1.7b` en CPU (~7 tokens/s, ~19 min de

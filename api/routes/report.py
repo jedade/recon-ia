@@ -405,14 +405,30 @@ def _build_provenance(recon: Recon, scan_results, analysis_result, raw: Optional
             'Reconnaissance passive uniquement — aucune interaction intrusive '
             'avec les systèmes cibles.'
         ),
+        'publisher':       _publisher(),
     }
+
+
+def _publisher() -> dict:
+    """
+    Éditeur des exports (charte ReconIA). Un JSON ne peut pas contenir
+    d'image : le logo est référencé par son URL publique, déduite de
+    RESULTS_PAGE_URL (même site que la page « Voir le résultat »), et omis
+    si cette URL n'est pas configurée en http(s).
+    """
+    info = {'name': 'ReconIA', 'tagline': 'De la donnée à la décision',
+            'pillars': ['Veille', 'Analyse', 'Intelligence'], 'website': 'https://idachallenge.bj'}
+    page = os.getenv('RESULTS_PAGE_URL', '')
+    if page.startswith(('https://', 'http://')):
+        info['logo_url'] = page.rsplit('/', 1)[0] + '/assets/brand/reconia-logo.png'
+    return info
 
 
 def _build_citation(recon: Recon, provenance: dict) -> str:
     """
     Chaîne de citation prête à être reprise dans un article.
 
-    Format : Recon-IA, scan of {domain}, {date UTC}, N outils passifs ({liste}),
+    Format : ReconIA, scan of {domain}, {date UTC}, N outils passifs ({liste}),
              dataset SHA-256: {hash}
     """
     tools = provenance.get('tools_requested') or []
@@ -421,7 +437,7 @@ def _build_citation(recon: Recon, provenance: dict) -> str:
         or provenance.get('generated_at')
     )
     return (
-        f"Recon-IA, scan of {recon.domain}, {scan_date}, "
+        f"ReconIA, scan of {recon.domain}, {scan_date}, "
         f"{len(tools)} outils passifs ({', '.join(tools) if tools else 'aucun'}), "
         f"dataset SHA-256: {provenance.get('dataset_sha256') or 'n/a'}"
     )
@@ -539,7 +555,7 @@ def build_export_json(recon: Recon, raw: dict) -> tuple:
         recon.id, recon.domain, len(provenance['tools_requested']),
         (provenance['dataset_sha256'] or 'n/a')[:12],
     )
-    filename = f'recon_ia_export_{_safe_filename_part(recon.domain)}_{recon.id}.json'
+    filename = f'reconia_export_{_safe_filename_part(recon.domain)}_{recon.id}.json'
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str), filename
 
 
@@ -556,13 +572,13 @@ def build_export_csv(recon: Recon, raw: dict) -> tuple:
         writer.writerow({key: _csv_safe(value) for key, value in row.items()})
 
     logger.info('[export.csv] recon_id=%d domain=%s lignes=%d', recon.id, recon.domain, len(rows))
-    filename = f'recon_ia_findings_{_safe_filename_part(recon.domain)}_{recon.id}.csv'
+    filename = f'reconia_constats_{_safe_filename_part(recon.domain)}_{recon.id}.csv'
     # BOM UTF-8 : Excel ouvre correctement les accents des libellés français
     return _UTF8_BOM + buffer.getvalue(), filename
 
 
 def pdf_filename(recon: Recon) -> str:
-    return f'rapport_osint_{_safe_filename_part(recon.domain)}_{recon.id}.pdf'
+    return f'reconia_rapport_{_safe_filename_part(recon.domain)}_{recon.id}.pdf'
 
 
 def _results_page_url() -> str:

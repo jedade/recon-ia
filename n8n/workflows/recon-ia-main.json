@@ -12,7 +12,10 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [-1744, -48],
+      "position": [
+        -1744,
+        -48
+      ],
       "id": "8149e9b3-77e8-4f77-9727-0d910ff32e70",
       "name": "Webhook",
       "webhookId": "5c0b4f0e-7a51-4c55-9d38-2f4c1d7e9a01",
@@ -38,7 +41,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1392, -48],
+      "position": [
+        -1392,
+        -48
+      ],
       "id": "1d1250f8-8d6b-4d6f-9572-46ea0a39e126",
       "name": "Launch Passive Recon",
       "credentials": {
@@ -46,7 +52,10 @@
           "id": "__CRED_API_SERVICE_ID__",
           "name": "Recon IA API service token (auto)"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -63,7 +72,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1152, -48],
+      "position": [
+        -1152,
+        -48
+      ],
       "id": "7b359d1e-fd57-43eb-becd-de46d171f07f",
       "name": "Start Analysis (async)",
       "credentials": {
@@ -71,7 +83,10 @@
           "id": "__CRED_API_SERVICE_ID__",
           "name": "Recon IA API service token (auto)"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -88,12 +103,15 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-912, -48],
+      "position": [
+        -912,
+        -48
+      ],
       "id": "e2fbde74-0c17-41a9-8675-85ee90b6b8c1",
       "name": "Wait for Analysis",
       "retryOnFail": true,
-      "maxTries": 4,
-      "waitBetweenTries": 2000,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
       "credentials": {
         "httpHeaderAuth": {
           "id": "__CRED_API_SERVICE_ID__",
@@ -116,7 +134,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-672, -48],
+      "position": [
+        -672,
+        -48
+      ],
       "id": "1c6790cc-3fa6-4aa8-baa9-4a347ab062ad",
       "name": "Generate Final Report",
       "credentials": {
@@ -124,7 +145,10 @@
           "id": "__CRED_API_SERVICE_ID__",
           "name": "Recon IA API service token (auto)"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -141,7 +165,10 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-432, -48],
+      "position": [
+        -432,
+        -48
+      ],
       "id": "091aaf40-8423-41a2-b93e-4f30ef641349",
       "name": "Generate PDF, seal results (+ email with access code)",
       "credentials": {
@@ -149,25 +176,68 @@
           "id": "__CRED_API_SERVICE_ID__",
           "name": "Recon IA API service token (auto)"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     }
   ],
   "pinData": {},
   "connections": {
     "Webhook": {
-      "main": [[{ "node": "Launch Passive Recon", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Launch Passive Recon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Launch Passive Recon": {
-      "main": [[{ "node": "Start Analysis (async)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Start Analysis (async)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Start Analysis (async)": {
-      "main": [[{ "node": "Wait for Analysis", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Wait for Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Wait for Analysis": {
-      "main": [[{ "node": "Generate Final Report", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Generate Final Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Generate Final Report": {
-      "main": [[{ "node": "Generate PDF, seal results (+ email with access code)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Generate PDF, seal results (+ email with access code)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,

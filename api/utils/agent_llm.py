@@ -247,7 +247,7 @@ def _gemini_backend() -> Tuple[Optional[OpenAICompatBackend], str]:
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         return None, "GEMINI_API_KEY absente"
-    model = (os.getenv("AGENT_GEMINI_MODEL") or os.getenv("GEMINI_MODEL") or "gemini-2.0-flash").strip()
+    model = (os.getenv("AGENT_GEMINI_MODEL") or os.getenv("GEMINI_MODEL") or "gemini-flash-latest").strip()
     return OpenAICompatBackend("gemini", GEMINI_BASE_URL, model, key,
                                timeout=_env_float("AGENT_LLM_TIMEOUT_SECONDS", 60.0)), ""
 

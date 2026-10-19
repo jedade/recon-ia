@@ -339,7 +339,7 @@ class TestBackendSelection:
         clean_env.setenv("DEEPSEEK_API_KEY", "k-ds")
         clean_env.setenv("DEEPSEEK_CONFIRM_EXTERNAL_SHARING", "true")
         backend, _ = select_backend()
-        assert backend.describe() == {"name": "gemini", "model": "gemini-2.0-flash"}
+        assert backend.describe() == {"name": "gemini", "model": "gemini-flash-latest"}
 
     def test_agent_gemini_model_override(self, clean_env):
         clean_env.setenv("GEMINI_API_KEY", "k")

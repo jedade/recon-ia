@@ -201,7 +201,10 @@
                 const fmt = (v) => v === null ? '—' : typeof v === 'boolean' ? (v ? 'oui' : 'non') : String(v);
                 return el('span', { text: keys.map((k) => k + ' : ' + fmt(value[k])).join(' · ') });
             }
-            const dl = el('dl', { class: 'kv' });
+            // Imbriqué : libellé au-dessus de la valeur (une grille dans la
+            // grille ne laissait que quelques pixels à la valeur → une lettre
+            // par ligne dans les cartes étroites).
+            const dl = el('dl', { class: depth >= 1 ? 'kv kv-nested' : 'kv' });
             keys.slice(0, MAX_KEYS).forEach((k) => {
                 dl.appendChild(el('dt', { text: k }));
                 dl.appendChild(el('dd', {}, renderValue(value[k], depth + 1)));
@@ -258,12 +261,13 @@
         svg.setAttribute('role', 'img');
         svg.setAttribute('aria-label', 'Score de sécurité ' + (score ?? 'inconnu') + ' sur 100');
         const r = 54;
-        const c = 2 * Math.PI * r;
         const pct = typeof score === 'number' ? Math.max(0, Math.min(100, score)) / 100 : 0;
         const color = pct >= 0.8 ? 'var(--ok)' : pct >= 0.6 ? 'var(--medium)' : pct >= 0.4 ? 'var(--high)' : 'var(--critical)';
         const mk = (tag, attrs) => { const n = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
         svg.appendChild(mk('circle', { class: 'track', cx: 66, cy: 66, r }));
-        svg.appendChild(mk('circle', { class: 'value', cx: 66, cy: 66, r, stroke: color, 'stroke-dasharray': `${c * pct} ${c}` }));
+        // pathLength=100 : le tracé se mesure en pourcentage, ce qui permet à
+        // result.css d'animer le remplissage (stroke-dasharray de 0 à pct).
+        svg.appendChild(mk('circle', { class: 'value', cx: 66, cy: 66, r, stroke: color, pathLength: 100, 'stroke-dasharray': `${(pct * 100).toFixed(1)} 100` }));
         const g = mk('text', { class: 'grade', x: 66, y: 70 }); g.textContent = grade || '—'; svg.appendChild(g);
         const s = mk('text', { class: 'score', x: 66, y: 92 }); s.textContent = typeof score === 'number' ? score + ' / 100' : 'n/a'; svg.appendChild(s);
         return svg;
@@ -316,21 +320,42 @@
         return section('Résumé', tiles, text ? el('div', { class: 'card', style: null }, el('p', { text })) : null);
     }
 
+    function meter(pct) {
+        const v = typeof pct === 'number' ? Math.max(0, Math.min(100, pct)) : 0;
+        const cls = v >= 90 ? 'ok' : v >= 60 ? 'mid' : 'low';
+        return el('div', { class: 'meter meter-' + cls, role: 'img', 'aria-label': v + ' %' },
+            el('span', { style: '--w:' + v + '%' }));
+    }
+
     function renderReliability(analysis) {
         const g = analysis.grounding_check;
         const c = analysis.coverage_check;
         if (!g && !c) return null;
         const cards = [];
-        if (g) cards.push(el('div', { class: 'card' },
+        if (g) cards.push(el('div', { class: 'card reliability' },
             el('h3', { text: 'Preuves vérifiées' }),
-            el('p', { text: (g.verified ?? 0) + ' constat(s) sur ' + (g.total_findings ?? 0) + ' ont une preuve retrouvée dans la donnée brute de l\'outil cité' + (g.verified_pct != null ? ' (' + g.verified_pct + ' %).' : '.') }),
-            el('p', { class: 'muted small', text: g.method || '' })));
-        if (c) cards.push(el('div', { class: 'card' },
-            el('h3', { text: 'Couverture de l\'analyse' }),
-            el('p', { text: (c.coverage_pct != null ? c.coverage_pct + ' %' : 'n/a') + ' des outils ayant produit des données sont exploités par l\'analyse.' }),
-            (c.tools_unreferenced || []).length ? el('p', { class: 'small' }, 'Non exploités : ', (c.tools_unreferenced || []).map((k, i) =>
-                [i ? ', ' : '', el('button', { class: 'link-btn', type: 'button', text: k, onclick: () => focusTool(k) })])) : null,
-            el('p', { class: 'muted small', text: 'Extraits de référence (OWASP, RFC…) cités : ' + (c.rag_snippets_used ?? 0) + ' / ' + (c.rag_snippets_available ?? 0) })));
+            el('p', { class: 'big-figure', text: g.verified_pct != null ? g.verified_pct + ' %' : 'n/a' }),
+            meter(g.verified_pct),
+            el('p', { text: (g.verified ?? 0) + ' constat(s) sur ' + (g.total_findings ?? 0) + ' ont une preuve retrouvée mot pour mot dans les données brutes de l\'outil cité.' }),
+            el('p', { class: 'muted small', text: 'Contrôle automatique : il vérifie que la preuve existe bien dans les données, pas que son interprétation soit juste.' })));
+        if (c) {
+            const missing = c.tools_unreferenced || [];
+            const parts = [];
+            if (c.tools_covered_by_model != null) parts.push(c.tools_covered_by_model + ' par l\'IA (constat ou avis par outil)');
+            if (c.tools_covered_by_rules != null) parts.push(c.tools_covered_by_rules + ' par les règles de sévérité');
+            cards.push(el('div', { class: 'card reliability' },
+                el('h3', { text: 'Couverture de l\'analyse' }),
+                el('p', { class: 'big-figure', text: c.coverage_pct != null ? c.coverage_pct + ' %' : 'n/a' }),
+                meter(c.coverage_pct),
+                el('p', { text: (c.tools_covered_count ?? 0) + ' outil(s) sur ' + (c.tools_with_data_count ?? 0) + ' ayant produit des données ont été examinés' + (parts.length ? ' — ' + parts.join(', ') + ' (un outil peut compter dans les deux).' : '.') }),
+                missing.length
+                    ? el('p', { class: 'small' }, 'Non examinés : ', missing.map((k, i) =>
+                        [i ? ', ' : '', el('button', { class: 'link-btn', type: 'button', text: k, onclick: () => focusTool(k) })]))
+                    : el('p', { class: 'small st-success', text: '✓ Toutes les données collectées ont été examinées.' }),
+                el('p', { class: 'muted small', text: (c.rag_snippets_available
+                    ? 'Références des normes (OWASP, ANSSI, RFC…) citées dans les recommandations : ' + (c.rag_snippets_used ?? 0) + ' sur ' + c.rag_snippets_available + '.'
+                    : 'Base de connaissance (normes OWASP, ANSSI, RFC…) non disponible pour cette analyse.') })));
+        }
         return section('Fiabilité de l\'analyse', el('div', { class: 'grid-2' }, cards));
     }
 
@@ -502,8 +527,11 @@
         return section('Exécution des ' + entries.length + ' outils', el('div', { class: 'card' }, bar, legend, pills));
     }
 
-    function renderToolCards(entries) {
+    function renderToolCards(entries, reviews) {
         if (!entries.length) return null;
+        // Avis du modèle par outil (tool_reviews), validés côté serveur
+        const REVIEW_LABELS = { ras: 'Rien à signaler', constat: 'A donné lieu à un constat', info: 'Information' };
+        const reviewOf = new Map((Array.isArray(reviews) ? reviews : []).filter((r) => r && r.tool).map((r) => [String(r.tool), r]));
         const grid = el('div', { class: 'masonry' });
         const categories = [...new Set(entries.map(([, v]) => v.meta.category).filter(Boolean))];
         let activeCat = null;
@@ -535,6 +563,9 @@
                     el('button', { class: 'ghost', type: 'button', 'aria-label': 'Explication de l\'outil ' + v.meta.tool, text: '?',
                         onclick: () => openInfo(v.meta.tool, v.meta.description, v.meta.indicators) })),
                 el('p', { class: 'cat' }, (v.meta.category || '') + ' · ', statusBadge(v.status), ' · ', el('code', { text: key })),
+                reviewOf.has(key) ? el('p', { class: 'review review-' + (reviewOf.get(key).verdict || 'info') },
+                    el('strong', { text: (REVIEW_LABELS[reviewOf.get(key).verdict] || 'Avis') + (reviewOf.get(key).note ? ' — ' : '') }),
+                    reviewOf.get(key).note || '') : null,
                 v.error ? el('p', { class: 'small st-error', text: String(v.error) }) : null,
                 renderValue(v.data),
                 raw ? el('details', {}, el('summary', { text: 'Sortie brute' }),
@@ -552,18 +583,20 @@
         container.textContent = '';
         [
             renderSummary(analysis, finalReport),
+            // Graphiques, globe et cartographie (web/result-visuals.js)
+            window.ReconVisuals ? window.ReconVisuals.overview(data, analysis, entries) : null,
             renderReliability(analysis),
             renderFindings(analysis),
             renderStrengthsAndActions(analysis),
             renderAttackChain(data.attack),
             renderMitre(analysis),
             renderToolStatus(entries),
-            renderToolCards(entries),
+            renderToolCards(entries, analysis.tool_reviews),
             section('Méthodologie', el('div', { class: 'card' },
                 el('p', { text: ((data.provenance || {}).methodology) || 'Reconnaissance passive uniquement.' }),
                 data.citation ? el('p', { class: 'muted small', text: 'Citation : ' + data.citation }) : null)),
         ].forEach((node) => { if (node) container.appendChild(node); });
-        document.title = (data.recon && data.recon.domain ? data.recon.domain + ' — ' : '') + 'Résultat Recon IA';
+        document.title = (data.recon && data.recon.domain ? data.recon.domain + ' — ' : '') + 'Résultat ReconIA';
     }
 
     // ── Démarrage ───────────────────────────────────────────────────

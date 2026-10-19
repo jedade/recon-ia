@@ -430,7 +430,7 @@ class TestExportJson:
         body = client.get(f'/recon/{full_recon}/export.json',
                           headers=auth_headers).get_json()
         citation = body['citation']
-        assert 'Recon-IA' in citation
+        assert 'ReconIA' in citation
         assert 'example.com' in citation
         assert '2 outils passifs' in citation
         assert body['provenance']['dataset_sha256'] in citation

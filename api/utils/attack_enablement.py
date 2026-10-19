@@ -686,14 +686,14 @@ def build_navigator_layer(findings: List[dict], mitre_attack: Optional[List[dict
 
     safe_domain = _safe_text(domain, 120)
     return {
-        "name": _safe_text(f"Recon-IA — {safe_domain}" if safe_domain else "Recon-IA", 200),
+        "name": _safe_text(f"ReconIA — {safe_domain}" if safe_domain else "ReconIA", 200),
         "versions": {"attack": ref["attack_version"].split(".")[0] if ref["attack_version"] else "",
                      "navigator": NAVIGATOR_VERSION, "layer": LAYER_VERSION},
         "domain": "enterprise-attack",
         "description": _safe_text(
             "Techniques ATT&CK rendues possibles par les constats d'une reconnaissance passive "
             "(couleur = sévérité maximale) et techniques de reconnaissance correspondant aux "
-            "informations collectées (gris). Table déterministe Recon-IA, référentiel ATT&CK "
+            "informations collectées (gris). Table déterministe ReconIA, référentiel ATT&CK "
             f"Enterprise v{ref['attack_version']}.", 600),
         "filters": {"platforms": ["Windows", "Linux", "macOS", "Network Devices", "PRE", "IaaS",
                                   "SaaS", "Office Suite", "Identity Provider", "Containers", "ESXi"]},
@@ -712,7 +712,7 @@ def build_navigator_layer(findings: List[dict], mitre_attack: Optional[List[dict
             {"label": "Faible", "color": SEVERITY_COLORS["LOW"]},
             {"label": "Reconnaissance (information collectable)", "color": RECON_COLOR},
         ],
-        "metadata": [{"name": "générateur", "value": "Recon-IA (reconnaissance passive)"}],
+        "metadata": [{"name": "générateur", "value": "ReconIA — De la donnée à la décision (reconnaissance passive)"}],
         "links": [],
         "showTacticRowBackground": False,
         "tacticRowBackground": "#dddddd",

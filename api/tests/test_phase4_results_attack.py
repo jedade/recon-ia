@@ -73,7 +73,7 @@ class TestNavigatorExport:
         assert resp.status_code == 200
         assert resp.mimetype == 'application/json'
         disposition = resp.headers['Content-Disposition']
-        assert disposition == f'attachment; filename="recon_ia_attack_navigator_example.com_{recon.id}.json"'
+        assert disposition == f'attachment; filename="reconia_attack_navigator_example.com_{recon.id}.json"'
         assert resp.headers['X-Content-Type-Options'] == 'nosniff'
         layer = json.loads(resp.data)
         assert layer['versions']['layer'] == '4.5'

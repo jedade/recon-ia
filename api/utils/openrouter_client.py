@@ -197,7 +197,7 @@ class OpenRouterClient:
                 "model":       current,
                 "messages":    messages,
                 "temperature": temperature,
-                "max_tokens":  4096,
+                "max_tokens":  int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8192")),
             }
             if tools:
                 kwargs["tools"]       = tools

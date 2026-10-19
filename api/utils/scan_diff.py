@@ -62,7 +62,7 @@ from datetime import datetime
 from typing import Optional
 
 from utils.entity_graph import (
-    certificate_id, extract_graph, norm_hostname, norm_text, tool_data, tool_ok,
+    certificate_id, extract_graph, norm_hostname, norm_text, subdomain_names, tool_data, tool_ok,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,9 @@ def extract_snapshot(raw, domain: Optional[str] = None) -> dict:
         'snapshot_version': SNAPSHOT_VERSION,
         'domain': root,
         'observed': observed,
-        'subdomains': sorted(values.get('subdomain', ())),
+        # Ensemble COMPLET (le graphe, lui, est plafonné) : comparer deux
+        # sous-ensembles plafonnés inventerait des apparitions/disparitions.
+        'subdomains': sorted(subdomain_names(root, raw)) if root else [],
         'ips': sorted(values.get('ip', ())),
         'ports': sorted(values.get('port', ())),
         'cves': sorted(values.get('vulnerability', ())),

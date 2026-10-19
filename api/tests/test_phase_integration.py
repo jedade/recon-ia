@@ -289,3 +289,175 @@ class TestRealStackFixes:
         out = recon_mod._ssl_info('example.com')
         assert tried[0] == '93.184.215.14'     # IPv4 essayée en premier
         assert out['status'] == 'success'
+
+    def test_graph_selection_is_deterministic(self):
+        subs = [f'h{i}.example.com' for i in range(6000)]
+        a = extract_graph('example.com', {'all_subdomains': {'status': 'success', 'data': subs}})
+        b = extract_graph('example.com', {'all_subdomains': {'status': 'success', 'data': list(reversed(subs))}})
+        assert set(a['entities']) == set(b['entities'])
+
+    def test_diff_compares_full_subdomain_sets(self):
+        """Mêmes 6 000 sous-domaines dans un autre ordre : aucun changement.
+        Avant correction, le plafond du graphe créait de fausses disparitions."""
+        from utils.scan_diff import diff_scans
+        subs = [f'h{i}.example.com' for i in range(6000)]
+        prev = {'domain': 'example.com', 'all_subdomains': {'status': 'success', 'data': subs}}
+        cur = {'domain': 'example.com', 'all_subdomains': {'status': 'success', 'data': list(reversed(subs))}}
+        diff = diff_scans(prev, cur, domain='example.com')
+        assert diff['subdomains']['added_count'] == 0
+        assert diff['subdomains']['removed_count'] == 0
+
+    def test_diff_still_detects_real_removal_beyond_cap(self):
+        from utils.scan_diff import diff_scans
+        subs = [f'h{i}.example.com' for i in range(6000)]
+        prev = {'domain': 'example.com', 'all_subdomains': {'status': 'success', 'data': subs}}
+        cur = {'domain': 'example.com', 'all_subdomains': {'status': 'success', 'data': subs[:-1]}}
+        diff = diff_scans(prev, cur, domain='example.com')
+        assert diff['subdomains']['removed'] == ['h5999.example.com']
+        assert diff['subdomains']['removed_count'] == 1
+
+
+# ── Ollama : synthèse REDUCE non analysable (constaté sur la stack réelle) ───
+
+import json as _json
+from utils import ollama_client as oc
+
+_MAP_OK = {'content': _json.dumps({'findings': [{'id': 'EMAIL-001', 'title': 'DMARC absent',
+                                                 'severity': 'HIGH', 'source_tool': 'dmarc_check'}],
+                                   'strengths': ['SPF présent']})}
+
+
+class TestReduceFallback:
+    @pytest.mark.parametrize('content,usable', [
+        ('{"findings": []}', True),
+        ('<think>...</think>\n```json\n{"findings": [{"id": "A"}]}\n```', True),
+        ('Voici le rapport : {"findings": [], "risk_level": "LOW"} fin.', True),
+        ('{"findings": [', False),
+        ('{"risk_level": "LOW"}', False),
+        ('', False),
+    ])
+    def test_reduce_output_usable(self, content, usable):
+        assert oc._reduce_output_usable(content) is usable
+
+    @pytest.mark.integration
+    def test_invalid_reduce_json_falls_back_to_map_findings(self, monkeypatch):
+        client = oc.OllamaClient()
+        monkeypatch.setattr(client, 'agentic_chat', lambda *a, **k: (dict(_MAP_OK), []))
+        monkeypatch.setattr(client, 'chat', lambda *a, **k: {'role': 'assistant', 'content': '{"findings": [ tronqué'})
+        msg, _searches, _ = client.map_reduce_agentic_chat(signals={'domain': 'example.com'},
+                                                           tool_handler=None, map_rounds=1)
+        report = _json.loads(msg['content'])
+        assert report['_reduce_degraded'] is True
+        assert report['findings'] and report['findings'][0]['title'] == 'DMARC absent'
+
+    @pytest.mark.integration
+    def test_valid_reduce_is_kept(self, monkeypatch):
+        client = oc.OllamaClient()
+        monkeypatch.setattr(client, 'agentic_chat', lambda *a, **k: (dict(_MAP_OK), []))
+        good = '{"findings": [{"id": "EMAIL-001", "title": "DMARC absent", "severity": "HIGH"}], "risk_level": "HIGH"}'
+        monkeypatch.setattr(client, 'chat', lambda *a, **k: {'role': 'assistant', 'content': good})
+        msg, _s, _ = client.map_reduce_agentic_chat(signals={'domain': 'example.com'}, tool_handler=None, map_rounds=1)
+        assert msg['content'] == good
+
+
+# ── Gemini : file de modèles lue sur l'API (gemini-2.0-flash retiré, 404) ───
+
+import utils.gemini_client as gc
+
+
+class _Resp:
+    def __init__(self, payload, status=200):
+        self._p, self.status_code = payload, status
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(self.status_code)
+    def json(self):
+        return self._p
+
+
+def _models(*names):
+    return {'models': [{'name': f'models/{n}', 'supportedGenerationMethods': ['generateContent']} for n in names]}
+
+
+class TestGeminiModelQueue:
+    def test_queue_uses_only_available_models(self, monkeypatch):
+        monkeypatch.setattr(gc, '_API_KEY', 'k')
+        monkeypatch.setattr(gc.requests, 'get', lambda *a, **k: _Resp(_models(
+            'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-2.5-flash-preview-tts',
+            'gemini-3-pro-image', 'gemini-3.5-flash', 'gemini-3.1-pro-preview')))
+        client = gc.GeminiClient()
+        q = client._model_queue
+        assert q[0] == 'gemini-flash-latest'
+        assert 'gemini-2.0-flash' not in q
+        assert not any('tts' in m or 'image' in m or 'preview' in m for m in q)
+        assert q.index('gemini-3.6-flash') < q.index('gemini-3.5-flash')
+
+    def test_retired_preferred_model_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(gc, '_API_KEY', 'k')
+        monkeypatch.setattr(gc.requests, 'get', lambda *a, **k: _Resp(_models('gemini-2.5-flash')))
+        client = gc.GeminiClient(model='gemini-2.0-flash')
+        assert client._model_queue == ['gemini-2.5-flash']
+
+    def test_listing_failure_falls_back_to_defaults(self, monkeypatch):
+        monkeypatch.setattr(gc, '_API_KEY', 'k')
+        def boom(*a, **k):
+            raise ConnectionError('hors ligne')
+        monkeypatch.setattr(gc.requests, 'get', boom)
+        q = gc.GeminiClient()._model_queue
+        assert q[0] == 'gemini-flash-latest' and 'gemini-2.0-flash' not in q
+
+    def test_overloaded_model_switches_to_next(self, monkeypatch):
+        monkeypatch.setattr(gc, '_API_KEY', 'k')
+        monkeypatch.setattr(gc.requests, 'get', lambda *a, **k: _Resp(_models('gemini-flash-latest', 'gemini-2.5-flash')))
+        client = gc.GeminiClient()
+        tried = []
+
+        class _Msg:
+            content = 'OK'
+
+        class _Choice:
+            message = _Msg()
+
+        class _R:
+            choices = [_Choice()]
+            usage = None
+
+        def create(**kw):
+            tried.append(kw['model'])
+            if kw['model'] == 'gemini-flash-latest':
+                raise RuntimeError("Error code: 503 - This model is currently experiencing high demand")
+            return _R()
+        monkeypatch.setattr(client._client.chat.completions, 'create', create)
+        assert client.chat([{'role': 'user', 'content': 'x'}]).content == 'OK'
+        assert tried == ['gemini-flash-latest', 'gemini-2.5-flash']
+
+    def test_newest_versions_first_and_audio_models_excluded(self, monkeypatch):
+        monkeypatch.setattr(gc, '_API_KEY', 'k')
+        monkeypatch.setattr(gc.requests, 'get', lambda *a, **k: _Resp(_models(
+            'gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-transcribe',
+            'gemini-omni-1.1-flash', 'gemini-flash-lite-latest')))
+        q = gc.GeminiClient()._model_queue
+        assert q == ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-flash-lite-latest']
+
+    def test_refused_models_move_to_end_for_next_analyses(self, monkeypatch):
+        monkeypatch.setattr(gc, '_API_KEY', 'k')
+        monkeypatch.setattr(gc, '_COOLDOWN', {})
+        monkeypatch.setattr(gc.requests, 'get', lambda *a, **k: _Resp(_models('gemini-flash-latest', 'gemini-3.6-flash')))
+        first = gc.GeminiClient()
+        assert first._model_queue[0] == 'gemini-flash-latest'
+
+        class _R:
+            class _C:
+                class message:
+                    content = 'OK'
+            choices = [_C()]
+            usage = None
+
+        def create(**kw):
+            if kw['model'] == 'gemini-flash-latest':
+                raise RuntimeError("Error code: 429 - You exceeded your current quota")
+            return _R()
+        monkeypatch.setattr(first._client.chat.completions, 'create', create)
+        first.chat([{'role': 'user', 'content': 'x'}])
+        # Analyse suivante : le modèle sans quota passe en dernier
+        assert gc.GeminiClient()._model_queue == ['gemini-3.6-flash', 'gemini-flash-latest']

@@ -132,6 +132,7 @@ def compute_coverage_check(
     report: Dict,
     scan_results: Optional[Dict],
     signals: Optional[Dict] = None,
+    rule_examined: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Calcule le résumé de couverture à assigner à `report["coverage_check"]`.
@@ -148,13 +149,20 @@ def compute_coverage_check(
     strengths = report.get("strengths") or []
     tools_with_data = _tools_with_exploitable_data(scan_results)
     tools_referenced = _tools_referenced(findings, strengths, tools_with_data)
-    tools_covered = tools_with_data & tools_referenced
-    tools_unreferenced = sorted(tools_with_data - tools_referenced)
+    # Avis par outil demandés au modèle (tool_reviews) : un outil examiné sans
+    # rien révéler compte comme examiné (verdict « ras »).
+    for review in report.get("tool_reviews") or []:
+        if isinstance(review, dict) and review.get("tool"):
+            tools_referenced.add(str(review["tool"]))
+    by_model = tools_with_data & tools_referenced
+    # Outils dont une règle déterministe a lu les données (severity_rules)
+    by_rules = tools_with_data & set(rule_examined or [])
+    tools_covered = by_model | by_rules
+    tools_unreferenced = sorted(tools_with_data - tools_covered)
 
-    coverage_pct = (
-        round(100 * len(tools_covered) / len(tools_with_data), 1)
-        if tools_with_data else None
-    )
+    def pct(part):
+        return round(100 * len(part) / len(tools_with_data), 1) if tools_with_data else None
+    coverage_pct = pct(tools_covered)
 
     rag_context = signals.get("rag_context") or []
     rag_available = len(rag_context) if isinstance(rag_context, list) else 0
@@ -168,6 +176,10 @@ def compute_coverage_check(
     return {
         "tools_with_data_count":    len(tools_with_data),
         "tools_covered_count":      len(tools_covered),
+        "tools_covered_by_model":   len(by_model),
+        "tools_covered_by_rules":   len(by_rules),
+        "model_coverage_pct":       pct(by_model),
+        "tools_reviewed_count":     sum(1 for r in (report.get("tool_reviews") or []) if isinstance(r, dict)),
         "tools_unreferenced":       tools_unreferenced,
         "coverage_pct":             coverage_pct,
         "rag_snippets_available":   rag_available,
@@ -177,10 +189,11 @@ def compute_coverage_check(
         "findings_citing_web_source": findings_with_web_source,
         "method": (
             "Couverture = proportion des outils status=success avec données "
-            "non vides cités en source_tool/source_tools d'un finding, ou "
-            "cités par leur clé entre parenthèses dans `strengths` (convention "
-            "demandée au modèle) — plancher, pas une mesure exacte si le "
-            "modèle ne suit pas cette convention (voir docstring du module). "
+            "non vides EXAMINÉS : cités en source_tool/source_tools d'un "
+            "finding, cités par leur clé dans `strengths`, ayant un avis dans "
+            "`tool_reviews` (un par outil, demandé au modèle), ou lus par une "
+            "règle de sévérité déterministe. La part du modèle seul est "
+            "donnée dans model_coverage_pct. "
             "RAG mesuré par citation du nom de la source dans une "
             "recommandation (le prompt demande de citer, pas de recopier) ; "
             "recherche web mesurée par présence de `web_sources` par finding."
