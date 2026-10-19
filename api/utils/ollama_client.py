@@ -94,13 +94,15 @@ _REDUCE_OUTPUT_SCHEMA = {
         {
             "id":             "string — ex: DNS-001, WEB-002",
             "category":       "DNS | SSL | Email | Web | Infrastructure | Subdomain | Reputation | Cloud",
-            "severity":       "CRITICAL | HIGH | MEDIUM | LOW | INFO",
+            "severity":       "CRITICAL | HIGH | MEDIUM | LOW | INFO (proposition, recalculée par le serveur)",
+            "confidence":     "high | medium | low (reprise du finding partiel)",
+            "observed_at":    "string ISO 8601 UTC — horodatage du scan",
             "title":          "string",
             "description":    "string",
             "evidence":       "string — donnée OSINT exacte",
             "source_tool":    "string OBLIGATOIRE — clé exacte de l'outil (reprise du champ source_tool du finding partiel correspondant, jamais vide)",
             "recommendation": "string",
-            "references":     ["string — CVE-XXXX, CWE-XXX, RFC XXXX"],
+            "references":     ["string — CWE-XXX, RFC XXXX (CVE seulement si présente dans les données)"],
             "web_sources":    ["string — URL"],
         }
     ],
@@ -129,6 +131,10 @@ _MAP_SYSTEM_PROMPT = (
     "{global_context}\n\n"
     "═══ DONNÉES À ANALYSER ═══\n"
     "{section_data}\n\n"
+    "═══ CONSTATS DÉJÀ ÉTABLIS PAR LE SERVEUR (sévérité imposée) ═══\n"
+    "{section_constats}\n\n"
+    "═══ GUIDANCE DU CORPUS (citer la source si utilisée) ═══\n"
+    "{section_guidance}\n\n"
     "═══ INSTRUCTIONS ═══\n"
     "1. Effectue des recherches web ciblées sur les éléments détectés (CVE, risques, best practices)\n"
     "2. Identifie tous les problèmes de sécurité dans cette section\n"
@@ -139,19 +145,24 @@ _MAP_SYSTEM_PROMPT = (
     "4. TRAÇABILITÉ OBLIGATOIRE : chaque finding DOIT porter un champ `source_tool` NON VIDE — la clé "
     "EXACTE (entre crochets ci-dessus, ex: dnssec, ssl_info, spf_analysis) de l'outil d'où vient la "
     "preuve. Un finding SANS `source_tool` est INVALIDE et sera rejeté\n"
-    "5. Produis UNIQUEMENT ce JSON valide (sans texte avant ou après) :\n\n"
+    "5. Un constat POSITIF (bonne pratique en place) va dans `strengths`, JAMAIS dans `findings` ; "
+    "il ne peut pas être HIGH ni CRITICAL. La sévérité est recalculée par le serveur\n"
+    "6. Ne cite une CVE QUE si elle apparaît dans les données ci-dessus — sinon elle est retirée\n"
+    "7. `confidence` : high (donnée directe), medium (déduction), low (indice faible)\n"
+    "8. Produis UNIQUEMENT ce JSON valide (sans texte avant ou après) :\n\n"
     "{{\n"
     "  \"findings\": [\n"
     "    {{\n"
     "      \"id\": \"DNS-001\",\n"
     "      \"category\": \"DNS|SSL|Email|Web|Infrastructure|Subdomain|Reputation|Cloud\",\n"
     "      \"severity\": \"CRITICAL|HIGH|MEDIUM|LOW|INFO\",\n"
+    "      \"confidence\": \"high|medium|low\",\n"
     "      \"title\": \"titre court\",\n"
     "      \"description\": \"explication détaillée\",\n"
     "      \"evidence\": \"donnée OSINT exacte\",\n"
     "      \"source_tool\": \"clé exacte de l'outil, ex: dnssec\",\n"
     "      \"recommendation\": \"action corrective concrète\",\n"
-    "      \"references\": [\"CVE-XXXX-XXXX\", \"CWE-XXX\"],\n"
+    "      \"references\": [\"CWE-XXX\", \"RFC XXXX\"],\n"
     "      \"web_sources\": [\"url1\"]\n"
     "    }}\n"
     "  ],\n"
@@ -177,7 +188,9 @@ _REDUCE_SYSTEM_PROMPT = (
     "citation de clé d'outil entre parenthèses telle quelle\n"
     "8. CONSERVER le champ `source_tool` de chaque finding partiel TEL QUEL en le "
     "fusionnant dans le rapport final — ne jamais le vider ni l'omettre, même en "
-    "fusionnant/dédupliquant plusieurs findings entre eux\n\n"
+    "fusionnant/dédupliquant plusieurs findings entre eux\n"
+    "9. CONSERVER `confidence` ; un constat positif reste dans `strengths` et n'est "
+    "jamais un finding HIGH/CRITICAL ; n'ajouter aucune CVE absente des findings partiels\n\n"
     "═══ FINDINGS PARTIELS PAR SECTION ═══\n"
     "{all_findings}\n\n"
     "═══ IMPORTANT ═══\n"
@@ -195,6 +208,31 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _reduce_output_usable(content: str) -> bool:
+    """
+    La synthèse REDUCE est-elle exploitable ? Objet JSON (éventuellement
+    entouré de <think>…</think> ou de ```json) contenant une liste `findings`.
+    Volontairement simple : en cas de doute, le repli sur les constats MAP
+    reste un rapport valide.
+    """
+    if not isinstance(content, str) or not content.strip():
+        return False
+    text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text).strip()
+    candidates = [text]
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        candidates.append(text[start:end + 1])
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("findings"), list):
+            return True
+    return False
+
+
 def _truncate_to_tokens(text: str, max_tokens: int) -> str:
     """Tronque le texte à max_tokens (approximatif)."""
     max_chars = max_tokens * 4
@@ -206,12 +244,17 @@ def _truncate_to_tokens(text: str, max_tokens: int) -> str:
 def _build_section_data(section_id: str, signals: dict) -> dict:
     """Extrait les données pertinentes pour une section OSINT donnée."""
     domain = signals.get("domain", "")
+    # Signaux de la collecte enrichie (phase 5), répartis par section pour que
+    # le petit modèle local ne reçoive que ce qui concerne la section.
+    extra = signals.get("passive_extra") or {}
+    dns_mass = extra.get("dns_mass") or {}
 
     if section_id == "dns_security":
         return {
-            "domain":  domain,
-            "dns":     signals.get("dns", {}),
-            "dnsbl":   (signals.get("network") or {}).get("dnsbl"),
+            "domain":     domain,
+            "dns":        signals.get("dns", {}),
+            "dnsbl":      (signals.get("network") or {}).get("dnsbl"),
+            "blocklists": extra.get("blocklists"),
         }
     if section_id == "network_infra":
         net = signals.get("network") or {}
@@ -222,17 +265,30 @@ def _build_section_data(section_id: str, signals: dict) -> dict:
             "ptr":        net.get("ptr"),
             "reverse_ip": net.get("reverse_ip"),
             "whois":      signals.get("whois"),
+            "hosting":    {k: dns_mass.get(k) for k in ("unique_ip_count", "cdn_distribution", "asns")
+                           if dns_mass.get(k)} or None,
+            "virustotal": extra.get("virustotal"),
         }
     if section_id == "ssl_tls":
-        return {"domain": domain, "ssl_tls": signals.get("ssl_tls", {})}
+        return {"domain": domain, "ssl_tls": signals.get("ssl_tls", {}),
+                "hsts_preloaded": (extra.get("ranking") or {}).get("hsts_preloaded")}
     if section_id == "email":
         return {"domain": domain, "email": signals.get("email", {})}
     if section_id == "web_tech":
-        return {"domain": domain, "web": signals.get("web", {})}
+        return {
+            "domain":       domain,
+            "web":          signals.get("web", {}),
+            "cookies":      extra.get("cookies"),
+            "threats":      extra.get("threats"),
+            "tranco_rank":  (extra.get("ranking") or {}).get("tranco_rank"),
+            "github_dorks": extra.get("github_dorks"),
+        }
     if section_id == "subdomains":
         return {
             "domain":     domain,
             "subdomains": signals.get("subdomains", {}),
+            "resolution": {k: dns_mass.get(k) for k in ("alive_count", "dead_count", "internal_ip_hosts")
+                           if dns_mass.get(k) is not None} or None,
         }
     return {"domain": domain}
 
@@ -255,24 +311,49 @@ def _build_global_context(signals: dict) -> str:
     spf       = ((signals.get("email") or {}).get("config") or {}).get("spf", "")
     dnsbl_ok  = ((signals.get("network") or {}).get("dnsbl") or {}).get("clean")
 
-    # Extraits RAG (OWASP Cheat Sheets/ASVS/WSTG) — seulement les 2 premiers et
-    # tronqués : ce contexte se répète dans CHAQUE prompt de section MAP (6x),
-    # contrairement au prompt unique des autres backends (_build_messages) qui
-    # peut se permettre les 6 extraits complets.
-    rag_ctx = signals.get("rag_context") or []
-    rag_lines = "\n".join(
-        f"  [{r.get('source', '?')}] {r.get('content', '')[:200]}"
-        for r in rag_ctx[:2]
-    ) or "  (aucun — RAG indisponible ou vide)"
-
+    # Les extraits RAG ne sont plus dans ce contexte global (répété 6×) : depuis
+    # la phase 3 (B7), ils sont rattachés à un constat et injectés uniquement
+    # dans la section concernée — voir _section_guidance().
     return (
         f"Technologies détectées : {', '.join(techs[:6]) or 'inconnues'}\n"
         f"Version TLS             : {tls_v or 'inconnue'}\n"
         f"Nombre de sous-domaines : {sub_count or 'inconnu'}\n"
         f"SPF                     : {spf or 'non configuré'}\n"
         f"DNSBL propre            : {dnsbl_ok}\n"
-        f"Guidance OWASP/ASVS/WSTG pertinente (citer la source si utilisée) :\n{rag_lines}"
+        f"Date du scan (observed_at) : {signals.get('scan_date') or 'inconnue'}"
     )
+
+
+# Section MAP → catégories de findings (pour ne donner à chaque section que
+# ses propres constats et extraits RAG).
+_SECTION_CATEGORIES: Dict[str, Tuple[str, ...]] = {
+    "dns_security":  ("DNS", "Reputation"),
+    "network_infra": ("Infrastructure", "Cloud"),
+    "ssl_tls":       ("SSL",),
+    "email":         ("Email",),
+    "web_tech":      ("Web",),
+    "subdomains":    ("Subdomain",),
+}
+
+
+def _section_constats(section_id: str, signals: dict) -> str:
+    cats = _SECTION_CATEGORIES.get(section_id, ())
+    lines = [
+        f"  - [{c.get('source_tool')}] {c.get('title')} → {c.get('severity')} ({c.get('evidence', '')[:120]})"
+        for c in (signals.get("deterministic_findings") or [])
+        if isinstance(c, dict) and c.get("category") in cats
+    ][:8]
+    return "\n".join(lines) or "  (aucun)"
+
+
+def _section_guidance(section_id: str, signals: dict) -> str:
+    """2 extraits RAG max par section, tronqués (petit modèle, contexte court)."""
+    cats = _SECTION_CATEGORIES.get(section_id, ())
+    rag = [r for r in (signals.get("rag_context") or [])
+           if isinstance(r, dict) and r.get("category") in cats][:2]
+    return "\n".join(
+        f"  [{r.get('source', '?')}] {str(r.get('content', ''))[:200]}" for r in rag
+    ) or "  (aucune)"
 
 
 def _parse_partial_findings(content: str) -> Optional[Dict]:
@@ -587,6 +668,8 @@ class OllamaClient:
                 domain=domain,
                 global_context=global_context,
                 section_data=section_json_trunc,
+                section_constats=_section_constats(section_id, signals),
+                section_guidance=_section_guidance(section_id, signals),
             )
 
             messages = [
@@ -680,6 +763,12 @@ class OllamaClient:
                 "[map-reduce][reduce] Rapport généré — %d caractères",
                 len(final_msg.get("content", "")),
             )
+            # Un petit modèle peut produire une synthèse non analysable (JSON
+            # tronqué ou mal formé). Constaté sur la stack réelle : le dossier
+            # entier échouait alors que les constats MAP étaient valides. On
+            # traite ce cas comme une erreur de synthèse → même repli.
+            if not _reduce_output_usable(final_msg.get("content", "")):
+                raise ValueError("synthèse REDUCE non analysable (JSON invalide ou sans findings)")
             return final_msg, all_searches, []
         except Exception as exc:
             # La synthèse (déduplication inter-sections, risk_score global,

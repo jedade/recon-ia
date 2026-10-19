@@ -49,3 +49,17 @@ limiter = Limiter(
     default_limits=["5000 per day", "1000 per hour"],
     storage_uri=_STORAGE_URI,
 )
+
+
+@limiter.request_filter
+def _exempt_pipeline_service():
+    """
+    Exempte des limites par IP les appels de n8n porteurs du jeton de service
+    (utils/auth.py). Ces appels partagent tous l'IP du conteneur n8n : les
+    limiter par IP revenait à imposer un plafond COMMUN à tous les
+    utilisateurs de la plateforme (CLAUDE.md §8, point S6 du plan d'action).
+    Le débit du pipeline reste borné en amont, par les limites des routes
+    publiques qui le déclenchent (POST /recon, POST /verify_email).
+    """
+    from utils.auth import is_service_request
+    return is_service_request()

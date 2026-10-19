@@ -184,3 +184,18 @@ class TestSsrfProtection:
         monkeypatch.setattr(v, 'resolve_domain_ips', lambda d: [])
         ok, _ = v.is_safe_domain('inexistant.tld')
         assert ok is True
+
+
+class TestDbUrl:
+    """Pilote PostgreSQL explicite (SQLAlchemy 2.1 a changé le défaut)."""
+
+    def test_postgresql_scheme_gets_psycopg2(self):
+        from db_url import with_psycopg2
+        assert with_psycopg2('postgresql://u:p@h:5432/d') == 'postgresql+psycopg2://u:p@h:5432/d'
+        assert with_psycopg2('postgres://u:p@h/d') == 'postgresql+psycopg2://u:p@h/d'
+
+    def test_other_urls_untouched(self):
+        from db_url import with_psycopg2
+        assert with_psycopg2('sqlite:///:memory:') == 'sqlite:///:memory:'
+        assert with_psycopg2('postgresql+psycopg://u@h/d') == 'postgresql+psycopg://u@h/d'
+        assert with_psycopg2('') == ''

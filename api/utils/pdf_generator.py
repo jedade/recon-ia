@@ -1,9 +1,11 @@
 # utils/pdf_generator.py
 """
-Génération de rapports PDF OSINT — Recon IA.
-Design professionnel : logo vectoriel natif, gradient, typographie soignée.
+Génération de rapports PDF OSINT — ReconIA.
+Charte ReconIA : logo officiel (api/static/brand/), bleu marine, bleu roi, cyan.
 """
 import io
+import os
+import re
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -12,6 +14,9 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm, mm
+from reportlab.lib.utils import ImageReader
+
+from utils import pdf_visuals as PV
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     HRFlowable, PageBreak, KeepTogether,
@@ -20,15 +25,15 @@ from reportlab.platypus import (
 PAGE_W, PAGE_H = A4
 
 # ── Palette ───────────────────────────────────────────────────────────────────
-C_DARK    = colors.HexColor('#0f172a')
-C_NAVY    = colors.HexColor('#1e293b')
-C_NAVY2   = colors.HexColor('#0d2137')
-C_CYAN    = colors.HexColor('#00d4ff')
-C_CYAN2   = colors.HexColor('#00b8e0')
-C_PURPLE  = colors.HexColor('#7c3aed')
+C_DARK    = colors.HexColor('#0A1F44')   # bleu marine de la charte
+C_NAVY    = colors.HexColor('#0E2C5E')
+C_NAVY2   = colors.HexColor('#0B1A38')
+C_CYAN    = colors.HexColor('#00C8F0')   # cyan du logo
+C_CYAN2   = colors.HexColor('#1677F2')
+C_PURPLE  = colors.HexColor('#0B5BD3')   # bleu roi (nom historique conservé)
 C_WHITE   = colors.white
 C_OFF     = colors.HexColor('#f8fafc')
-C_LIGHT   = colors.HexColor('#f1f5f9')
+C_LIGHT   = colors.HexColor('#EEF3FB')
 C_BORDER  = colors.HexColor('#e2e8f0')
 C_TEXT    = colors.HexColor('#1e293b')
 C_MUTED   = colors.HexColor('#64748b')
@@ -104,111 +109,75 @@ def _ps(name: str, **kw) -> ParagraphStyle:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  DESSIN DU LOGO VECTORIEL
+#  LOGO RECONIA (images de la charte, api/static/brand/)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _draw_logo_box(canvas, x: float, y: float, size: float) -> None:
-    """
-    Dessine l'icône Recon IA :
-      - Carré arrondi avec dégradé horizontal cyan (#00d4ff) → violet (#7c3aed)
-      - Icône SVG « layers » en blanc (trait, pas rempli)
-    Les coordonnées (x, y) désignent le coin inférieur gauche de la boîte.
-    """
-    canvas.saveState()
+# Fichiers PNG à fond transparent, générés depuis le logo officiel
+# (docs/brand/make_brand.py). Absents ou illisibles : repli sur le nom en
+# texte — un PDF sans logo vaut mieux qu'un rapport qui échoue.
+_BRAND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          'static', 'brand')
+_brand_cache: dict = {}
 
-    radius = size * 0.22
 
-    # ── Clip au carré arrondi ────────────────────────────────────────────────
-    p = canvas.beginPath()
-    p.roundRect(x, y, size, size, radius)
-    canvas.clipPath(p, stroke=0, fill=0)
+def _brand_image(name: str):
+    """ImageReader mis en cache, ou None si le fichier manque."""
+    if name not in _brand_cache:
+        try:
+            _brand_cache[name] = ImageReader(os.path.join(_BRAND_DIR, name))
+        except Exception:
+            _brand_cache[name] = None
+    return _brand_cache[name]
 
-    # ── Dégradé horizontal cyan → violet (50 bandes) ────────────────────────
-    c1, c2 = C_CYAN, C_PURPLE
-    n = 50
-    for i in range(n):
-        t   = i / (n - 1)
-        r_  = c1.red   * (1 - t) + c2.red   * t
-        g_  = c1.green * (1 - t) + c2.green * t
-        b_  = c1.blue  * (1 - t) + c2.blue  * t
-        canvas.setFillColorRGB(r_, g_, b_)
-        sx  = x + i * size / n
-        canvas.rect(sx, y, size / n + 0.6, size, fill=1, stroke=0)
 
-    # ── Icône SVG « layers » — coordonnées SVG 24×24 → espace canvas ────────
-    #  SVG : y croît vers le bas  →  canvas : y croît vers le haut
-    #  Transformation : px = x + svgX * sc,  py = y + (24 - svgY) * sc
-    sc = size / 24
-    pad = size * 0.18          # marge intérieure
-    sc2 = (size - 2 * pad) / 24
-
-    def pt(sx, sy):
-        return x + pad + sx * sc2, y + pad + (24 - sy) * sc2
-
-    sw = size * 0.078          # épaisseur de trait
-
-    canvas.setStrokeColor(C_WHITE)
-    canvas.setLineCap(1)       # round cap
-    canvas.setLineJoin(1)      # round join
-    canvas.setLineWidth(sw)
-
-    # Chemin 1 : losange M12 2L2 7L12 12L22 7Z
-    p1 = canvas.beginPath()
-    p1.moveTo(*pt(12, 2))
-    p1.lineTo(*pt(2,  7))
-    p1.lineTo(*pt(12, 12))
-    p1.lineTo(*pt(22, 7))
-    p1.close()
-    canvas.drawPath(p1, fill=0, stroke=1)
-
-    # Chemin 2 : trait horizontal y=17  M2 17H22
-    p2 = canvas.beginPath()
-    p2.moveTo(*pt(2,  17))
-    p2.lineTo(*pt(22, 17))
-    canvas.drawPath(p2, fill=0, stroke=1)
-
-    # Chemin 3 : chevron M2 12L12 17L22 12
-    p3 = canvas.beginPath()
-    p3.moveTo(*pt(2,  12))
-    p3.lineTo(*pt(12, 17))
-    p3.lineTo(*pt(22, 12))
-    canvas.drawPath(p3, fill=0, stroke=1)
-
-    # Chemin 4 : trait vertical M12 17V22
-    p4 = canvas.beginPath()
-    p4.moveTo(*pt(12, 17))
-    p4.lineTo(*pt(12, 22))
-    canvas.drawPath(p4, fill=0, stroke=1)
-
-    canvas.restoreState()
+def _draw_image_fit(canvas, img, x: float, y: float, width: float) -> float:
+    """Dessine `img` à la largeur donnée (transparence conservée) ; renvoie la hauteur."""
+    iw, ih = img.getSize()
+    h = width * ih / iw
+    canvas.drawImage(img, x, y, width=width, height=h, mask='auto')
+    return h
 
 
 def _draw_logo_full(canvas, x: float, y: float, box_size: float,
-                    font_size: float = None) -> float:
+                    font_size: float = None, text_color=None) -> float:
     """
-    Dessine logo (icône + texte « Recon IA »).
-    Retourne la largeur totale occupée.
+    Symbole ReconIA + nom « Recon » (couleur `text_color`, blanc par défaut)
+    et « IA » en bleu vif. (x, y) = coin inférieur gauche ; `box_size` = hauteur
+    du symbole. Retourne la largeur totale occupée.
     """
     fs = font_size or box_size * 0.58
-    gap = box_size * 0.32
+    gap = box_size * 0.28
+    mark = _brand_image('reconia-mark-160.png')
+    mark_w = 0.0
+    if mark is not None:
+        iw, ih = mark.getSize()
+        mark_w = box_size * iw / ih
+        canvas.drawImage(mark, x, y, width=mark_w, height=box_size, mask='auto')
+    else:
+        gap = 0.0
 
-    _draw_logo_box(canvas, x, y, box_size)
-
-    tx = x + box_size + gap
-    ty = y + box_size * 0.5 - fs * 0.65
-
+    tx = x + mark_w + gap
+    ty = y + box_size * 0.5 - fs * 0.35
     canvas.setFont('Helvetica-Bold', fs)
-    canvas.setFillColor(C_WHITE)
-    canvas.drawString(tx, ty + fs * 0.62, 'Recon')
-
-    # «IA» en cyan
+    canvas.setFillColor(text_color or C_WHITE)
+    canvas.drawString(tx, ty, 'Recon')
     recon_w = canvas.stringWidth('Recon', 'Helvetica-Bold', fs)
     canvas.setFillColor(C_CYAN)
-    canvas.drawString(tx + recon_w + fs * 0.18, ty + fs * 0.62, 'IA')
+    canvas.drawString(tx + recon_w, ty, 'IA')
+    return mark_w + gap + recon_w + canvas.stringWidth('IA', 'Helvetica-Bold', fs)
 
-    ia_w  = canvas.stringWidth('IA', 'Helvetica-Bold', fs)
-    total = box_size + gap + recon_w + fs * 0.18 + ia_w
-    return total
+
+def _gradient_band(canvas, x: float, y: float, w: float, h: float) -> None:
+    """Bande horizontale au dégradé du logo : marine → bleu roi → cyan."""
+    stops = [C_DARK, C_PURPLE, C_CYAN]
+    n = 60
+    for i in range(n):
+        t = i / (n - 1)
+        a, b, u = (stops[0], stops[1], t * 2) if t < 0.5 else (stops[1], stops[2], (t - 0.5) * 2)
+        canvas.setFillColorRGB(a.red + (b.red - a.red) * u,
+                               a.green + (b.green - a.green) * u,
+                               a.blue + (b.blue - a.blue) * u)
+        canvas.rect(x + i * w / n, y, w / n + 0.6, h, fill=1, stroke=0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -216,16 +185,14 @@ def _draw_logo_full(canvas, x: float, y: float, box_size: float,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _page_cover(canvas, doc):
-    """Page de couverture : fond sombre dégradé, logo en haut."""
+    """Page de couverture : fond clair de la charte, logo complet en haut."""
     canvas.saveState()
 
-    # Fond principal
-    canvas.setFillColor(C_DARK)
+    canvas.setFillColor(C_WHITE)
     canvas.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
-    # Bande décorative diagonale en bas-droite (accent)
-    canvas.setFillColor(colors.HexColor('#0a1f3c'))
-    import math
+    # Triangle décoratif bas-droite, bleu très pâle
+    canvas.setFillColor(C_LIGHT)
     p = canvas.beginPath()
     p.moveTo(PAGE_W * 0.55, 0)
     p.lineTo(PAGE_W, 0)
@@ -233,65 +200,58 @@ def _page_cover(canvas, doc):
     p.close()
     canvas.drawPath(p, fill=1, stroke=0)
 
-    # Bande cyan en haut (6mm)
-    canvas.setFillColor(C_CYAN)
-    canvas.rect(0, PAGE_H - 6*mm, PAGE_W, 6*mm, fill=1, stroke=0)
+    # Carrés « pixels » repris du symbole, coin haut-gauche
+    for (px, py, s, col) in [(1.6, 2.4, 5, '#00C8F0'), (2.6, 3.4, 7, '#19B4F0'),
+                             (1.2, 4.6, 4, '#1677F2'), (3.4, 5.2, 5, '#0B5BD3'),
+                             (2.2, 6.4, 3.5, '#00C8F0')]:
+        canvas.setFillColor(colors.HexColor(col))
+        canvas.roundRect(px * cm, PAGE_H - py * cm, s * mm, s * mm, 0.8 * mm, fill=1, stroke=0)
 
-    # Bande violet en bas (4mm)
-    canvas.setFillColor(C_PURPLE)
-    canvas.rect(0, 0, PAGE_W, 4*mm, fill=1, stroke=0)
+    # Bandes au dégradé du logo (haut 6 mm, bas 4 mm)
+    _gradient_band(canvas, 0, PAGE_H - 6*mm, PAGE_W, 6*mm)
+    _gradient_band(canvas, 0, 0, PAGE_W, 4*mm)
 
-    # Ligne horizontale décorative (séparateur bas-couverture)
-    canvas.setStrokeColor(colors.HexColor('#1e3a5f'))
-    canvas.setLineWidth(0.5)
-    canvas.line(2*cm, PAGE_H * 0.30, PAGE_W - 2*cm, PAGE_H * 0.30)
-
-    # Logo centré en haut de la couverture
-    logo_size = 52
-    logo_total_w = logo_size + logo_size * 0.32 + \
-                   canvas.stringWidth('Recon', 'Helvetica-Bold', logo_size * 0.58) + \
-                   logo_size * 0.58 * 0.18 + \
-                   canvas.stringWidth('IA', 'Helvetica-Bold', logo_size * 0.58)
-    lx = (PAGE_W - logo_total_w) / 2
-    ly = PAGE_H - 6*mm - logo_size - 18*mm
-    _draw_logo_full(canvas, lx, ly, logo_size)
+    # Logo complet (symbole + ReconIA + slogan) centré
+    logo = _brand_image('reconia-logo-600.png')
+    if logo is not None:
+        lw = 6.2*cm
+        iw, ih = logo.getSize()
+        lh = lw * ih / iw
+        _draw_image_fit(canvas, logo, (PAGE_W - lw) / 2, PAGE_H - 6*mm - 8*mm - lh, lw)
+    else:
+        w = _draw_logo_full(canvas, 0, -100, 40, text_color=C_DARK)   # mesure hors page
+        _draw_logo_full(canvas, (PAGE_W - w) / 2, PAGE_H - 6*mm - 30*mm, 40, text_color=C_DARK)
 
     canvas.restoreState()
 
 
 def _page_content(canvas, doc):
-    """Pages de contenu : header avec logo petit + pied de page."""
+    """Pages de contenu : bandeau marine avec le logo, pied de page avec le slogan."""
     canvas.saveState()
 
-    # ── Header ──────────────────────────────────────────────────────────────
-    # Fond header
+    # ── En-tête ─────────────────────────────────────────────────────────────
     canvas.setFillColor(C_DARK)
     canvas.rect(0, PAGE_H - 14*mm, PAGE_W, 14*mm, fill=1, stroke=0)
-    # Accent cyan (4mm)
-    canvas.setFillColor(C_CYAN)
-    canvas.rect(0, PAGE_H - 4*mm, PAGE_W, 4*mm, fill=1, stroke=0)
+    _gradient_band(canvas, 0, PAGE_H - 2.5*mm, PAGE_W, 2.5*mm)
 
-    # Logo petit (20px)
-    box_s = 20
-    lx    = 1.5*cm
-    ly    = PAGE_H - 14*mm + (14*mm - box_s) / 2 - 1
-    _draw_logo_full(canvas, lx, ly, box_s, font_size=10)
+    box_s = 22
+    lx = 1.5*cm
+    ly = PAGE_H - 14*mm + (11.5*mm - box_s) / 2
+    _draw_logo_full(canvas, lx, ly, box_s, font_size=11)
 
-    # Titre du rapport centré
     canvas.setFont('Helvetica', 8)
-    canvas.setFillColor(colors.HexColor('#94a3b8'))
-    canvas.drawCentredString(PAGE_W / 2, PAGE_H - 9*mm, 'Rapport de Sécurité OSINT')
+    canvas.setFillColor(colors.HexColor('#9DB0CF'))
+    canvas.drawCentredString(PAGE_W / 2, PAGE_H - 9*mm, 'Rapport de reconnaissance passive')
 
-    # Domaine + page à droite
     domain = getattr(doc, '_report_domain', '')
     canvas.setFont('Helvetica-Bold', 8)
     canvas.setFillColor(C_CYAN)
     canvas.drawRightString(PAGE_W - 1.5*cm, PAGE_H - 7*mm, domain)
     canvas.setFont('Helvetica', 7.5)
-    canvas.setFillColor(colors.HexColor('#64748b'))
-    canvas.drawRightString(PAGE_W - 1.5*cm, PAGE_H - 11.5*mm, f'Page {doc.page}')
+    canvas.setFillColor(colors.HexColor('#9DB0CF'))
+    canvas.drawRightString(PAGE_W - 1.5*cm, PAGE_H - 11*mm, f'Page {doc.page}')
 
-    # ── Footer ───────────────────────────────────────────────────────────────
+    # ── Pied de page ────────────────────────────────────────────────────────
     canvas.setFillColor(C_OFF)
     canvas.rect(0, 0, PAGE_W, 10*mm, fill=1, stroke=0)
     canvas.setStrokeColor(C_BORDER)
@@ -299,9 +259,10 @@ def _page_content(canvas, doc):
     canvas.line(1.5*cm, 10*mm, PAGE_W - 1.5*cm, 10*mm)
     canvas.setFont('Helvetica', 7)
     canvas.setFillColor(C_MUTED)
-    canvas.drawString(1.5*cm, 4*mm, 'Recon IA — Document confidentiel — Usage interne uniquement')
+    canvas.drawString(1.5*cm, 4*mm,
+                      'ReconIA — De la donnée à la décision · Document confidentiel')
     canvas.setFont('Helvetica-Bold', 7)
-    canvas.setFillColor(colors.HexColor('#94a3b8'))
+    canvas.setFillColor(C_PURPLE)
     canvas.drawRightString(PAGE_W - 1.5*cm, 4*mm, 'idachallenge.bj')
 
     canvas.restoreState()
@@ -314,9 +275,9 @@ def _page_content(canvas, doc):
 S = {
     # Couverture
     'cov_tag':    _ps('cov_tag',   fontSize=9,  leading=11, textColor=colors.HexColor('#64748b'),  alignment=TA_CENTER, spaceAfter=3),
-    'cov_domain': _ps('cov_dom',   fontName='Helvetica-Bold', fontSize=28, leading=32, textColor=C_CYAN,  alignment=TA_CENTER, spaceAfter=4),
-    'cov_sub':    _ps('cov_sub',   fontSize=11, leading=15, textColor=colors.HexColor('#94a3b8'), alignment=TA_CENTER, spaceAfter=2),
-    'cov_info':   _ps('cov_info',  fontSize=9.5, leading=16, textColor=colors.HexColor('#94a3b8'), alignment=TA_CENTER),
+    'cov_domain': _ps('cov_dom',   fontName='Helvetica-Bold', fontSize=28, leading=32, textColor=C_PURPLE, alignment=TA_CENTER, spaceAfter=4),
+    'cov_sub':    _ps('cov_sub',   fontSize=11, leading=15, textColor=C_SLATE, alignment=TA_CENTER, spaceAfter=2),
+    'cov_info':   _ps('cov_info',  fontSize=9.5, leading=16, textColor=C_SLATE, alignment=TA_CENTER),
     'cov_conf':   _ps('cov_conf',  fontName='Helvetica-Oblique', fontSize=8, leading=11, textColor=colors.HexColor('#334155'), alignment=TA_CENTER),
     # Titres
     'h1':         _ps('h1',        fontName='Helvetica-Bold', fontSize=16, leading=20, textColor=C_DARK,  spaceBefore=12, spaceAfter=4),
@@ -404,283 +365,334 @@ def _kv_table(rows: list, col1_w: float = 5*cm) -> Table:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _build_cover(story: list, analysis: dict, recon: Any, timing: dict) -> None:
-    domain     = analysis.get('domain') or (recon.domain if recon else 'unknown')
-    risk_level = analysis.get('risk_level', 'N/A')
-    # Préférer security_score (champ enrichi par l'IA) à risk_score (champ brut)
-    risk_score = analysis.get('security_score') if analysis.get('security_score') is not None \
-                 else analysis.get('risk_score', 0)
-    sec_grade  = analysis.get('security_grade') or ''
-    rc         = RISK_C.get(str(risk_level).upper(), C_MUTED)
-
-    # Prénom / nom / email
+    """
+    Couverture sobre, à la manière d'un rapport d'audit : identification du
+    document seulement. Le score, le niveau de risque et les chiffres sont
+    dans la synthèse (page 3), pas sur la page de garde.
+    """
+    domain = analysis.get('domain') or (recon.domain if recon else 'unknown')
     fn = _safe(getattr(recon, 'firstname', '')) if recon else ''
-    ln = _safe(getattr(recon, 'lastname',  '')) if recon else ''
-    em = _safe(getattr(recon, 'email',     '')) if recon else ''
-
-    # Date
+    ln = _safe(getattr(recon, 'lastname', '')) if recon else ''
+    ref = f'RIA-{getattr(recon, "id", 0):05d}' if recon and getattr(recon, 'id', None) else '—'
     analyzed_at = analysis.get('analyzed_at', '')
     try:
-        dt      = datetime.fromisoformat(analyzed_at.replace('Z', '+00:00'))
-        date_str = dt.strftime('%d/%m/%Y à %H:%M UTC')
+        dt = datetime.fromisoformat(str(analyzed_at).replace('Z', '+00:00'))
+        date_str = dt.strftime('%d/%m/%Y')
     except Exception:
-        date_str = analyzed_at[:10] if analyzed_at else '—'
+        date_str = datetime.utcnow().strftime('%d/%m/%Y')
 
-    # Espace sous le logo (logo dessiné sur canvas, pas dans les flowables)
-    story.append(Spacer(1, 4.2*cm))
-
-    # Tag
-    story.append(Paragraph('RAPPORT DE SÉCURITÉ OSINT', S['cov_tag']))
-    story.append(Spacer(1, 0.5*cm))
-
-    # Domaine
-    story.append(Paragraph('Domaine analysé', S['cov_sub']))
+    story.append(Spacer(1, 6.6*cm))     # place du logo, dessiné par _page_cover
+    story.append(Paragraph('RAPPORT DE RECONNAISSANCE PASSIVE', S['cov_tag']))
+    story.append(Spacer(1, 0.25*cm))
+    story.append(Paragraph('Évaluation de l\'exposition externe', _ps(
+        '_cov_title', fontName='Helvetica-Bold', fontSize=20, leading=24, textColor=C_DARK, alignment=TA_CENTER)))
+    story.append(Spacer(1, 0.35*cm))
     story.append(Paragraph(_safe(domain), S['cov_domain']))
-    story.append(Spacer(1, 1.0*cm))
+    story.append(Spacer(1, 1.1*cm))
 
-    # Badge risque
-    rc_hex = _hex(rc)
-    risk_tbl = Table([[
-        Paragraph(
-            f'<font color="{rc_hex}"><b>{risk_level}</b></font>',
-            _ps('_rb', fontName='Helvetica-Bold', fontSize=22, textColor=C_WHITE, alignment=TA_CENTER),
-        ),
-        Paragraph(
-            f'<font color="{rc_hex}"><b>{risk_score}</b></font>',
-            _ps('_rs', fontName='Helvetica-Bold', fontSize=44, leading=50, textColor=C_WHITE, alignment=TA_CENTER),
-        ),
-    ]], colWidths=[5.5*cm, 4*cm])
-    risk_tbl.setStyle(TableStyle([
-        ('BACKGROUND',    (0, 0), (-1, -1), colors.HexColor('#1e293b')),
-        ('BOX',           (0, 0), (0, 0), 2, rc),
-        ('BOX',           (1, 0), (1, 0), 2, rc),
-        ('LINERIGHT',     (0, 0), (0, 0), 1, colors.HexColor('#334155')),
-        ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING',    (0, 0), (-1, -1), 16),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 16),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 12),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 12),
-    ]))
-    wrap = Table([[risk_tbl]], colWidths=[PAGE_W - 3*cm])
-    wrap.setStyle(TableStyle([
-        ('ALIGN',         (0, 0), (0, 0), 'CENTER'),
-        ('TOPPADDING',    (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-    ]))
-    story.append(wrap)
-
-    sub_ps = _ps('_sub', fontSize=10, textColor=colors.HexColor('#94a3b8'), alignment=TA_CENTER)
-    grade_suffix = f' — Grade {sec_grade}' if sec_grade else ''
-    story.append(Paragraph(f'/100{grade_suffix}', sub_ps))
-    story.append(Spacer(1, 0.9*cm))
-
-    # Séparateur
-    story.append(HRFlowable(width='65%', thickness=0.5,
-                             color=colors.HexColor('#1e3a5f'), hAlign='CENTER'))
-    story.append(Spacer(1, 0.7*cm))
-
-    # Infos
-    nb_findings = len(analysis.get('findings', []) or [])
-    nb_searches = len(analysis.get('searches_performed', []) or [])
-    model       = analysis.get('model_used', '—')
-
-    lines = [
-        (f'Préparé pour',    f'{fn} {ln}'),
-        ('Email',            em),
-        ("Date d'analyse",   date_str),
-        ('Durée totale',     _fmt_s(timing.get('total_duration_s'))),
-        ('Scan OSINT',       _fmt_s(timing.get('scan_duration_s'))),
-        ('Analyse IA',       _fmt_s(timing.get('analysis_duration_s'))),
-        ('Findings',         f'{nb_findings} identifié(s)'),
-        ('Modèle IA',        _safe(model)),
-        ('Recherches web',   str(nb_searches)),
+    rows = [
+        ('Préparé pour', f'{fn} {ln}'.strip() or '—'),
+        ('Référence', ref),
+        ('Date du rapport', date_str),
+        ('Méthode', 'Reconnaissance passive (OSINT) — aucun test intrusif'),
+        ('Classification', 'CONFIDENTIEL — diffusion restreinte au destinataire'),
     ]
-    ps_k = _ps('_ck', fontName='Helvetica-Bold', fontSize=8.5, textColor=colors.HexColor('#64748b'), alignment=TA_RIGHT)
-    ps_v = _ps('_cv', fontSize=8.5, textColor=colors.HexColor('#cbd5e1'))
-    ps_s = _ps('_cs', fontSize=8.5, textColor=colors.HexColor('#1e3a5f'))
-
-    info_rows = [[Paragraph(k, ps_k), Paragraph('·', ps_s), Paragraph(v, ps_v)]
-                 for k, v in lines]
-    info_tbl = Table(info_rows, colWidths=[3.8*cm, 0.5*cm, None])
-    info_tbl.setStyle(TableStyle([
-        ('ALIGN',         (0, 0), (0, -1), 'RIGHT'),
-        ('ALIGN',         (1, 0), (1, -1), 'CENTER'),
-        ('TOPPADDING',    (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 0),
+    ps_k = _ps('_ck', fontName='Helvetica-Bold', fontSize=8.5, textColor=C_SLATE)
+    ps_v = _ps('_cv', fontSize=9, textColor=C_TEXT)
+    tbl = Table([[Paragraph(k.upper(), ps_k), Paragraph(_safe(v), ps_v)] for k, v in rows],
+                colWidths=[4.2*cm, 9.3*cm])
+    tbl.setStyle(TableStyle([
+        ('LINEBELOW',     (0, 0), (-1, -2), 0.4, C_BORDER),
+        ('LINEABOVE',     (0, 0), (-1, 0), 1.2, C_PURPLE),
+        ('LINEBELOW',     (0, -1), (-1, -1), 1.2, C_PURPLE),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 7),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
     ]))
-    wrap2 = Table([[info_tbl]], colWidths=[PAGE_W - 3*cm])
-    wrap2.setStyle(TableStyle([('ALIGN', (0, 0), (0, 0), 'CENTER'),
-                                ('TOPPADDING', (0, 0), (-1, -1), 0),
-                                ('BOTTOMPADDING', (0, 0), (-1, -1), 0)]))
-    story.append(wrap2)
-    story.append(Spacer(1, 0.7*cm))
+    wrap = Table([[tbl]], colWidths=[PAGE_W - 3*cm])
+    wrap.setStyle(TableStyle([('ALIGN', (0, 0), (0, 0), 'CENTER'),
+                              ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0)]))
+    story.append(wrap)
+    story.append(Spacer(1, 1.4*cm))
     story.append(Paragraph(
-        'Document confidentiel — Usage interne uniquement — © 2026 Recon IA',
-        S['cov_conf'],
-    ))
+        'Ce document contient des informations sur l\'exposition de sécurité d\'un système d\'information. '
+        'Il est destiné exclusivement à son destinataire et ne doit pas être diffusé sans autorisation.',
+        S['cov_conf']))
     story.append(PageBreak())
 
 
-def _build_summary(story: list, analysis: dict) -> None:
-    story.extend(_section('Résumé Exécutif', '◆'))
+_CONTENTS = [
+    ('1', 'Synthèse', 'Score, niveau de risque, répartition des constats, couverture'),
+    ('2', 'Exposition géographique et infrastructure', 'Localisation des serveurs, cartographie'),
+    ('3', 'Présentation de l\'infrastructure', 'DNS, TLS, messagerie, web, réseau'),
+    ('4', 'Constats détaillés', 'Preuve, outil source, techniques ATT&CK, recommandation'),
+    ('5', 'Surface d\'attaque et MITRE ATT&CK', 'Services exposés, techniques, chaîne plausible'),
+    ('6', 'Points forts et plan d\'action', 'Bonnes pratiques constatées, priorités'),
+    ('7', 'Méthodologie et sources', 'Outils exécutés, limites de la collecte'),
+]
+_SEVERITY_SCALE = [
+    ('CRITICAL', 'Critique', 'Exploitable en l\'état ou activement exploitée (ex. CVE du catalogue CISA KEV). Traitement immédiat.'),
+    ('HIGH', 'Élevée', 'Expose directement à une attaque courante (usurpation d\'email, prise de contrôle de sous-domaine…). Sous 7 jours.'),
+    ('MEDIUM', 'Moyenne', 'Affaiblit les défenses sans être exploitable seule. Dans le mois.'),
+    ('LOW', 'Faible', 'Écart aux bonnes pratiques à faible impact. À planifier.'),
+    ('INFO', 'Info', 'Information de contexte ou bonne pratique constatée.'),
+]
 
-    summary = analysis.get('executive_summary', '—')
-    story.append(Paragraph(_safe(summary), S['body']))
-    story.append(Spacer(1, 0.5*cm))
 
-    findings = analysis.get('findings', []) or []
-    atk      = analysis.get('attack_surface', {}) or {}
-    sev      = {s: 0 for s in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO')}
-    for f in findings:
-        k = str(f.get('severity', 'INFO')).upper()
-        sev[k] = sev.get(k, 0) + 1
+def _build_contents(story: list) -> None:
+    """Sommaire, périmètre et échelle de sévérité (page 2)."""
+    story.extend(_section('Sommaire', '◆'))
+    ps_n = _ps('_tn', fontName='Helvetica-Bold', fontSize=13, textColor=C_PURPLE, alignment=TA_CENTER)
+    ps_t = _ps('_tt', fontName='Helvetica-Bold', fontSize=10.5, textColor=C_DARK)
+    ps_d = _ps('_td', fontSize=8.5, textColor=C_MUTED)
+    rows = [[Paragraph(n, ps_n), [Paragraph(_safe(t), ps_t), Paragraph(_safe(d), ps_d)]] for n, t, d in _CONTENTS]
+    toc = Table(rows, colWidths=[1.2*cm, PAGE_W - 3*cm - 1.2*cm])
+    toc.setStyle(TableStyle([
+        ('LINEBELOW', (0, 0), (-1, -1), 0.4, C_BORDER),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(toc)
+    story.append(Spacer(1, 0.6*cm))
 
-    total_sub = atk.get('total_subdomains', 0) or 0
-    nb_svc    = len(atk.get('exposed_services', []) or [])
-    nb_tech   = len(atk.get('technologies', []) or [])
-    nb_str    = len(analysis.get('strengths', []) or [])
-
-    def _metric_cell(label: str, value: str, accent: colors.Color = C_CYAN):
-        return Table([[
-            Paragraph(_safe(label), _ps('_ml', fontSize=7.5, textColor=C_MUTED, alignment=TA_CENTER)),
-            Paragraph(_safe(value), _ps('_mv', fontName='Helvetica-Bold', fontSize=18,
-                                         textColor=accent, alignment=TA_CENTER)),
-        ]], colWidths=[None], rowHeights=[None, None])
-
-    crit_c = C_MUTED if sev['CRITICAL'] == 0 else SEV_C['CRITICAL']
-    high_c = C_MUTED if sev['HIGH'] == 0 else SEV_C['HIGH']
-
-    metrics = [
-        ('CRITICAL',        str(sev['CRITICAL']),                 crit_c),
-        ('HIGH',            str(sev['HIGH']),                     high_c),
-        ('MEDIUM',          str(sev['MEDIUM']),                   SEV_C['MEDIUM']),
-        ('LOW / INFO',      str(sev['LOW'] + sev['INFO']),        SEV_C['LOW']),
-        ('Sous-domaines',   str(total_sub),                       C_CYAN),
-        ('Services exposés', str(nb_svc),                         C_CYAN),
-        ('Technologies',    str(nb_tech),                         C_CYAN),
-        ('Points forts',    str(nb_str),                          colors.HexColor('#10b981')),
-    ]
-    cw = (PAGE_W - 3*cm) / 8
-    cells = []
-    for lbl, val, ac in metrics:
-        ps_l = _ps('_sl', fontSize=7, leading=9, textColor=C_MUTED, alignment=TA_CENTER)
-        ps_v = _ps('_sv', fontName='Helvetica-Bold', fontSize=17, textColor=ac, alignment=TA_CENTER)
-        cells.append(Table(
-            [[Paragraph(lbl, ps_l)], [Paragraph(val, ps_v)]],
-            colWidths=[cw],
-        ))
-    m_tbl = Table([cells], colWidths=[cw] * 8)
-    m_style = [
-        ('GRID',          (0, 0), (-1, -1), 0.4, C_BORDER),
-        ('TOPPADDING',    (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 2),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
-        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-    ]
-    for i in range(8):
-        bg = C_OFF if i % 2 == 0 else C_WHITE
-        m_style.append(('BACKGROUND', (i, 0), (i, 0), bg))
-    if sev['CRITICAL']:
-        m_style.append(('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#fef2f2')))
-    if sev['HIGH']:
-        m_style.append(('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#fff7ed')))
-    m_tbl.setStyle(TableStyle(m_style))
-    story.append(m_tbl)
+    story.extend(_section('Périmètre et méthode', '◆'))
+    for text in (
+        '<b>Objectif.</b> Mesurer ce qu\'un attaquant peut apprendre du domaine à partir de sources publiques, '
+        'et en déduire les risques et les actions prioritaires.',
+        '<b>Méthode.</b> Reconnaissance strictement passive : DNS public, journaux de certificats, archives du web, '
+        'bases de réputation et d\'exposition, et une visite de la page d\'accueil comme un navigateur. '
+        'Aucun scan de ports, aucune force brute, aucune tentative d\'exploitation.',
+        '<b>Analyse.</b> La sévérité de chaque constat est fixée par des règles déterministes appliquées aux données '
+        'brutes ; l\'intelligence artificielle rédige et recommande à partir des seules données collectées. '
+        'Chaque constat cite l\'outil qui l\'a prouvé.',
+        '<b>Limites.</b> Une reconnaissance passive ne voit que l\'exposition publique : elle ne remplace pas un test '
+        'd\'intrusion autorisé. Les outils sans clé ou en échec sont listés dans la méthodologie.',
+    ):
+        story.append(Paragraph(text, S['body']))
     story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph('<b>Échelle de sévérité</b>', S['h2']))
+    ps_l = _ps('_sl2', fontName='Helvetica-Bold', fontSize=8.5, textColor=C_WHITE, alignment=TA_CENTER)
+    rows = [[Paragraph(label, ps_l), Paragraph(_safe(desc), S['td'])] for key, label, desc in _SEVERITY_SCALE]
+    scale = Table(rows, colWidths=[2.6*cm, PAGE_W - 3*cm - 2.6*cm])
+    style = [('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('GRID', (0, 0), (-1, -1), 0.4, C_BORDER),
+             ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5)]
+    for i, (key, _, _) in enumerate(_SEVERITY_SCALE):
+        style.append(('BACKGROUND', (0, i), (0, i), PV.SEV_COLORS[key]))
+    scale.setStyle(TableStyle(style))
+    story.append(scale)
+    story.append(PageBreak())
 
-    # ── Score de sécurité global ──────────────────────────────────────────────
-    sec_score   = analysis.get('security_score')
-    sec_grade   = analysis.get('security_grade') or ''
-    sec_posture = analysis.get('security_posture') or ''
-    breakdown   = analysis.get('security_breakdown') or {}
 
-    if sec_score is not None or sec_posture or breakdown:
-        story.append(Spacer(1, 0.2*cm))
-        ps_sec_title = _ps('_stit', fontName='Helvetica-Bold', fontSize=11, textColor=C_CYAN)
-        story.append(Paragraph('Score de Sécurité Global', ps_sec_title))
-        story.append(Spacer(1, 0.2*cm))
+def _two_cols(left, right, ratio: float = 0.5) -> Table:
+    """Deux blocs côte à côte sur la largeur utile."""
+    total = PAGE_W - 3*cm
+    t = Table([[left, right]], colWidths=[total * ratio, total * (1 - ratio)])
+    t.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                           ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                           ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0)]))
+    return t
 
-        if sec_score is not None:
-            sc_color = (colors.HexColor('#ef4444') if sec_score < 40 else
-                        colors.HexColor('#f59e0b') if sec_score < 60 else
-                        colors.HexColor('#00d4ff'))
-            ps_sc = _ps('_scv', fontName='Helvetica-Bold', fontSize=28, textColor=sc_color, alignment=TA_CENTER)
-            ps_sg = _ps('_sgr', fontName='Helvetica-Bold', fontSize=14, textColor=sc_color, alignment=TA_CENTER)
-            ps_sl = _ps('_sll', fontSize=8, textColor=C_MUTED, alignment=TA_CENTER)
-            sc_tbl = Table([
-                [Paragraph(str(sec_score), ps_sc), Paragraph(sec_grade, ps_sg)],
-                [Paragraph('/100', ps_sl),          Paragraph('Grade', ps_sl)],
-            ], colWidths=[4*cm, 3*cm])
-            sc_tbl.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), C_LIGHT),
-                ('BOX',        (0, 0), (-1, -1), 1, sc_color),
-                ('ALIGN',      (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ]))
-            wrap_sc = Table([[sc_tbl]], colWidths=[PAGE_W - 3*cm])
-            wrap_sc.setStyle(TableStyle([('ALIGN', (0, 0), (0, 0), 'CENTER'),
-                                         ('TOPPADDING', (0,0),(-1,-1), 0),
-                                         ('BOTTOMPADDING', (0,0),(-1,-1), 0)]))
-            story.append(wrap_sc)
-            story.append(Spacer(1, 0.2*cm))
 
-        if sec_posture:
-            story.append(Paragraph(_safe(sec_posture),
-                                    _ps('_sp', fontSize=9.5, textColor=C_TEXT, leading=14)))
-            story.append(Spacer(1, 0.25*cm))
+def _panel(title: str, *flowables) -> Table:
+    """Encadré titré (fond clair) pour un graphique ou un bloc de chiffres."""
+    ps = _ps('_pt', fontName='Helvetica-Bold', fontSize=9, textColor=C_DARK)
+    content = [[Paragraph(_safe(title), ps)]] + [[f] for f in flowables if f is not None]
+    t = Table(content, colWidths=[(PAGE_W - 3*cm) / 2 - 8])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), C_OFF), ('BOX', (0, 0), (-1, -1), 0.5, C_BORDER),
+        ('LINEABOVE', (0, 0), (-1, 0), 2, C_PURPLE),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8), ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    return t
 
-        # Breakdown par catégorie
-        if breakdown and isinstance(breakdown, dict):
-            ps_bth = _ps('_bth', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE)
-            ps_btd = _ps('_btd', fontSize=8, textColor=C_TEXT)
-            ps_btd_c = _ps('_btdc', fontSize=8, textColor=C_TEXT, alignment=TA_CENTER)
-            bkd_hdr = [Paragraph(c, ps_bth) for c in ['Catégorie', 'Score', 'Grade', 'Findings', 'Critical', 'High']]
-            bkd_rows = [bkd_hdr]
-            for cat, val in breakdown.items():
-                if not isinstance(val, dict):
-                    continue
-                cat_score = val.get('score', 0)
-                sc_col = (colors.HexColor('#ef4444') if cat_score < 40 else
-                          colors.HexColor('#f59e0b') if cat_score < 60 else
-                          colors.HexColor('#10b981') if cat_score >= 80 else
-                          colors.HexColor('#f59e0b'))
-                ps_sc_val = _ps('_bscv', fontName='Helvetica-Bold', fontSize=8,
-                                textColor=sc_col, alignment=TA_CENTER)
-                bkd_rows.append([
-                    Paragraph(_safe(str(cat)), ps_btd),
-                    Paragraph(str(cat_score), ps_sc_val),
-                    Paragraph(_safe(str(val.get('grade', '—'))), ps_btd_c),
-                    Paragraph(str(val.get('findings_count', 0)), ps_btd_c),
-                    Paragraph(str(val.get('critical', 0)), ps_btd_c),
-                    Paragraph(str(val.get('high', 0)), ps_btd_c),
-                ])
-            if len(bkd_rows) > 1:
-                cw_bkd = [(PAGE_W - 3*cm) * p for p in [0.30, 0.14, 0.12, 0.18, 0.13, 0.13]]
-                bkd_tbl = Table(bkd_rows, colWidths=cw_bkd)
-                bkd_style = [
-                    ('BACKGROUND',    (0, 0), (-1, 0), C_NAVY),
-                    ('ROWBACKGROUNDS',(0, 1), (-1, -1), [C_WHITE, C_OFF]),
-                    ('GRID',          (0, 0), (-1, -1), 0.3, C_BORDER),
-                    ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-                    ('TOPPADDING',    (0, 0), (-1, -1), 4),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                    ('LEFTPADDING',   (0, 0), (-1, -1), 5),
-                    ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
-                ]
-                # Colorier en rouge les lignes avec critical > 0
-                for ri, (cat, val) in enumerate(breakdown.items(), start=1):
-                    if isinstance(val, dict) and val.get('critical', 0) > 0:
-                        bkd_style.append(('BACKGROUND', (0, ri), (-1, ri), colors.HexColor('#fef2f2')))
-                    elif isinstance(val, dict) and val.get('high', 0) > 0:
-                        bkd_style.append(('BACKGROUND', (0, ri), (-1, ri), colors.HexColor('#fff7ed')))
-                bkd_tbl.setStyle(TableStyle(bkd_style))
-                story.append(bkd_tbl)
-                story.append(Spacer(1, 0.3*cm))
+
+def _build_summary(story: list, analysis: dict, scan_data: Optional[dict] = None) -> None:
+    """Synthèse : jauge de score, chiffres clés, résumé, graphiques, posture."""
+    story.extend(_section('Synthèse', '◆'))
+    findings = analysis.get('findings', []) or []
+    sec_score = analysis.get('security_score')
+    sec_grade = analysis.get('security_grade') or ''
+    risk_level = str(analysis.get('risk_level') or 'N/A').upper()
+    scan = (scan_data or {}).get('data', scan_data) or {}
+
+    sev_parts = PV.severity_parts(findings)
+    st_parts, ok_tools, total_tools = PV.status_parts(scan)
+    atk = analysis.get('attack_surface', {}) or {}
+
+    # Jauge + chiffres clés
+    rc = RISK_C.get(risk_level, C_MUTED)
+    ps_k = _ps('_kk', fontSize=8, textColor=C_MUTED)
+    ps_v = _ps('_kv', fontName='Helvetica-Bold', fontSize=11, textColor=C_DARK)
+    facts = [
+        ('Niveau de risque', f'<font color="{_hex(rc)}">{_safe(risk_level)}</font>'),
+        ('Constats retenus', str(len(findings))),
+        ('Dont critiques / élevés', f'{sev_parts[0][1]} / {sev_parts[1][1]}'),
+        ('Sous-domaines découverts', str(atk.get('total_subdomains', 0) or 0)),
+        ('Outils exploitables', f'{ok_tools} / {total_tools}' if total_tools else '—'),
+    ]
+    facts_tbl = Table([[Paragraph(k, ps_k), Paragraph(v, ps_v)] for k, v in facts],
+                      colWidths=[4.2*cm, 4.2*cm])
+    facts_tbl.setStyle(TableStyle([('LINEBELOW', (0, 0), (-1, -2), 0.4, C_BORDER),
+                                   ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4)]))
+    story.append(_two_cols(_panel('Score de sécurité', PV.score_gauge(sec_score, sec_grade, size=170)),
+                           _panel('Chiffres clés', facts_tbl)))
+    story.append(Spacer(1, 0.4*cm))
+
+    summary = analysis.get('executive_summary')
+    if summary:
+        story.append(Paragraph('<b>Résumé exécutif</b>', S['h2']))
+        story.append(Paragraph(_safe(summary), S['body']))
+        story.append(Spacer(1, 0.3*cm))
+
+    # Graphiques
+    sev_chart = PV.donut(sev_parts, str(len(findings)), 'CONSTATS', width=235, height=110)
+    cat_chart = PV.category_bars(findings, width=235)
+    story.append(_two_cols(_panel('Constats par sévérité', sev_chart),
+                           _panel('Constats par catégorie', cat_chart or Paragraph('Aucun constat.', S['small']))))
+    story.append(Spacer(1, 0.3*cm))
+    if total_tools:
+        cov = PV.donut(st_parts, f'{round(100 * ok_tools / total_tools)}%', 'UTILES', width=235, height=110)
+        posture = analysis.get('security_posture')
+        story.append(_two_cols(_panel('Couverture de la collecte', cov),
+                               _panel('Posture de sécurité', Paragraph(_safe(posture), S['small'])) if posture
+                               else _panel('Lecture', Paragraph(
+                                   'Le score part de 100 et diminue selon la sévérité des constats retenus. '
+                                   'La couverture indique la part des outils qui ont produit des données.', S['small']))))
+        story.append(Spacer(1, 0.3*cm))
+
+    breakdown = analysis.get('security_breakdown') or {}
+    if breakdown and isinstance(breakdown, dict):
+        _breakdown_table(story, breakdown)
+    story.append(PageBreak())
+
+
+def _build_exposure_maps(story: list, analysis: dict, scan_data: Optional[dict]) -> None:
+    """Carte des serveurs et cartographie de l'infrastructure (page dédiée)."""
+    scan = (scan_data or {}).get('data', scan_data) or {}
+    points = PV.geo_points(scan)
+    domain = analysis.get('domain') or scan.get('domain') or ''
+    graph = PV.infra_graph(str(domain), scan, width=PAGE_W - 3*cm, height=8.2*cm)
+    if not points and graph is None:
+        return
+    story.extend(_section('Exposition géographique et infrastructure', '◆'))
+    if points:
+        story.append(Paragraph('<b>Localisation des serveurs</b>', S['h2']))
+        story.append(PV.world_map(points, width=PAGE_W - 3*cm))
+        story.append(Spacer(1, 0.25*cm))
+        ps = S['td']
+        rows = [[Paragraph(h, S['th']) for h in ('Lieu', 'Hébergeur', 'Adresses IP')]]
+        for p in points[:10]:
+            rows.append([
+                Paragraph(_safe(', '.join(v for v in (p['city'], p['country']) if v) or '—'), ps),
+                Paragraph(_safe(' · '.join(p['orgs']) or '—'), ps),
+                Paragraph(_safe(', '.join(p['ips'][:4]) + (f' (+{len(p["ips"]) - 4})' if len(p['ips']) > 4 else '')), S['mono']),
+            ])
+        t = Table(rows, colWidths=[4.6*cm, 5.4*cm, None], repeatRows=1)
+        t.setStyle(TableStyle(list(_BASE_TBL_STYLE) + [('BACKGROUND', (0, 0), (-1, 0), C_NAVY)] + _alt_rows(len(rows))))
+        story.append(t)
+        story.append(Spacer(1, 0.45*cm))
+    if graph is not None:
+        story.append(Paragraph('<b>Cartographie de l\'infrastructure</b>', S['h2']))
+        story.append(Paragraph('Relations observées passivement entre le domaine, ses adresses IP (et leur hébergeur) '
+                               'et ses sous-domaines actifs (12 au plus).', S['small']))
+        story.append(Spacer(1, 0.15*cm))
+        story.append(graph)
+    story.append(PageBreak())
+
+
+def _breakdown_table(story: list, breakdown: dict) -> None:
+    """Tableau du score par catégorie (security_breakdown)."""
+    story.append(Paragraph('<b>Score par catégorie</b>', S['h2']))
+    # Détail par catégorie
+    if breakdown and isinstance(breakdown, dict):
+        ps_bth = _ps('_bth', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE)
+        ps_btd = _ps('_btd', fontSize=8, textColor=C_TEXT)
+        ps_btd_c = _ps('_btdc', fontSize=8, textColor=C_TEXT, alignment=TA_CENTER)
+        bkd_hdr = [Paragraph(c, ps_bth) for c in ['Catégorie', 'Score', 'Note', 'Constats', 'Critiques', 'Élevés']]
+        bkd_rows = [bkd_hdr]
+        for cat, val in breakdown.items():
+            if not isinstance(val, dict):
+                continue
+            cat_score = val.get('score', 0)
+            sc_col = (colors.HexColor('#ef4444') if cat_score < 40 else
+                      colors.HexColor('#f59e0b') if cat_score < 60 else
+                      colors.HexColor('#10b981') if cat_score >= 80 else
+                      colors.HexColor('#f59e0b'))
+            ps_sc_val = _ps('_bscv', fontName='Helvetica-Bold', fontSize=8,
+                            textColor=sc_col, alignment=TA_CENTER)
+            bkd_rows.append([
+                Paragraph(_safe(str(cat)), ps_btd),
+                Paragraph(str(cat_score), ps_sc_val),
+                Paragraph(_safe(str(val.get('grade', '—'))), ps_btd_c),
+                Paragraph(str(val.get('findings_count', 0)), ps_btd_c),
+                Paragraph(str(val.get('critical', 0)), ps_btd_c),
+                Paragraph(str(val.get('high', 0)), ps_btd_c),
+            ])
+        if len(bkd_rows) > 1:
+            cw_bkd = [(PAGE_W - 3*cm) * p for p in [0.30, 0.14, 0.12, 0.18, 0.13, 0.13]]
+            bkd_tbl = Table(bkd_rows, colWidths=cw_bkd)
+            bkd_style = [
+                ('BACKGROUND',    (0, 0), (-1, 0), C_NAVY),
+                ('ROWBACKGROUNDS',(0, 1), (-1, -1), [C_WHITE, C_OFF]),
+                ('GRID',          (0, 0), (-1, -1), 0.3, C_BORDER),
+                ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING',    (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING',   (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
+            ]
+            # Colorier en rouge les lignes avec critical > 0
+            for ri, (cat, val) in enumerate(breakdown.items(), start=1):
+                if isinstance(val, dict) and val.get('critical', 0) > 0:
+                    bkd_style.append(('BACKGROUND', (0, ri), (-1, ri), colors.HexColor('#fef2f2')))
+                elif isinstance(val, dict) and val.get('high', 0) > 0:
+                    bkd_style.append(('BACKGROUND', (0, ri), (-1, ri), colors.HexColor('#fff7ed')))
+            bkd_tbl.setStyle(TableStyle(bkd_style))
+            story.append(bkd_tbl)
+            story.append(Spacer(1, 0.3*cm))
+
+
+_CONFIDENCE_LABEL = {'high': 'élevée', 'medium': 'moyenne', 'low': 'faible'}
+_TECH_ID_RE = re.compile(r'^T\d{4}(?:\.\d{3})?$')
+_MIT_ID_RE = re.compile(r'^M\d{4}$')
+
+
+def _ref_label(ref) -> str:
+    """Référence d'un constat : chaîne (ancien format) ou {collection, source} (phase 3)."""
+    if isinstance(ref, str):
+        return ref
+    if isinstance(ref, dict):
+        src = ref.get('source') if isinstance(ref.get('source'), str) else ''
+        col = ref.get('collection') if isinstance(ref.get('collection'), str) else ''
+        return f'{src} ({col})' if src and col else src
+    return ''
+
+
+def _attack_items(items, regex) -> list:
+    """« <b>T1566</b> Phishing » pour chaque entrée {id, name} dont l'ID est valide."""
+    out = []
+    for it in items or []:
+        if isinstance(it, dict) and isinstance(it.get('id'), str) and regex.match(it['id']):
+            out.append(f"<b>{_safe(it['id'])}</b> {_safe(str(it.get('name') or '')[:120])}")
+    return out[:10]
+
+
+def _with_attack(analysis: dict) -> dict:
+    """
+    Copie de l'analyse dont les constats sont (ré)annotés par la table
+    déterministe (idempotent) + chaîne d'attaque. Un échec de l'annotation
+    n'empêche jamais la génération du PDF.
+    """
+    try:
+        from utils.attack_enablement import annotate_findings, build_attack_chain
+        from utils.mitre_attack import attack_version
+        findings = annotate_findings(analysis.get('findings') or [], {})
+        return {**analysis, 'findings': findings,
+                '_attack_chain': build_attack_chain(findings), '_attack_version': attack_version()}
+    except Exception:
+        return analysis
 
 
 def _build_findings(story: list, analysis: dict) -> None:
@@ -705,7 +717,7 @@ def _build_findings(story: list, analysis: dict) -> None:
         desc  = _safe(f.get('description', ''))
         evid  = _safe(f.get('evidence', ''))
         reco  = _safe(f.get('recommendation', ''))
-        refs  = [_safe(r) for r in (f.get('references', []) or [])[:8]]
+        refs  = [_safe(r) for r in (_ref_label(x) for x in (f.get('references', []) or [])[:8]) if r]
         srcs  = [_safe(s) for s in (f.get('web_sources', []) or [])[:3]]
 
         sc_hex = _hex(sc)
@@ -756,6 +768,28 @@ def _build_findings(story: list, analysis: dict) -> None:
             body_rows.append([Paragraph(
                 f'<font color="{_hex(colors.HexColor("#10b981"))}"><b>Recommandation</b></font>',
                 S['label']), Paragraph(reco, S['body'])])
+        # Phase 3/4 : confiance, horodatage, techniques rendues possibles,
+        # mitigations (table déterministe utils/attack_enablement.py)
+        conf = _CONFIDENCE_LABEL.get(str(f.get('confidence') or '').lower())
+        observed = f.get('observed_at') if isinstance(f.get('observed_at'), str) else None
+        if conf or observed:
+            parts = []
+            if conf:
+                parts.append(f'Confiance : <b>{conf}</b>')
+            if observed:
+                parts.append(f'observé le {_safe(observed[:25])}')
+            body_rows.append([Paragraph('<b>Fiabilité</b>', S['label']),
+                               Paragraph('  ·  '.join(parts), S['small'])])
+        enabled = _attack_items(f.get('attack_enabled'), _TECH_ID_RE)
+        if enabled:
+            body_rows.append([Paragraph('<b>Rend possible</b>', S['label']),
+                               Paragraph('<br/>'.join(enabled), S['small'])])
+        mitig = _attack_items(f.get('mitigations'), _MIT_ID_RE)
+        if mitig:
+            advice = f.get('mitigation_advice') if isinstance(f.get('mitigation_advice'), str) else ''
+            body_rows.append([Paragraph('<b>Mitigations</b>', S['label']),
+                               Paragraph('<br/>'.join(mitig) + (f'<br/><i>{_safe(advice[:600])}</i>' if advice else ''),
+                                         S['small'])])
         if refs:
             body_rows.append([Paragraph('<b>Références</b>', S['label']),
                                Paragraph('  ·  '.join(refs), S['small'])])
@@ -905,6 +939,46 @@ def _build_mitre_attack(story: list, analysis: dict) -> None:
                 S['bullet'],
             ))
         story.append(Spacer(1, 0.3*cm))
+
+
+def _build_attack_chain(story: list, analysis: dict) -> None:
+    """Chaîne d'attaque plausible (phase 4) — structure déterministe
+    (utils/attack_enablement.py::build_attack_chain), pas une production du LLM."""
+    chain = analysis.get('_attack_chain') or []
+    if not chain:
+        return
+
+    story.extend(_section("Chaîne d'Attaque Plausible", '◆'))
+    story.append(Paragraph(
+        "Enchaînement que les constats rendent <b>possible</b> pour un attaquant, déduit d'une "
+        "table déterministe (référentiel MITRE ATT&amp;CK Enterprise "
+        f"v{_safe(analysis.get('_attack_version') or '?')}). Ce n'est pas une attaque observée.",
+        S['body_l'],
+    ))
+    story.append(Spacer(1, 0.3*cm))
+
+    hdr = [Paragraph(t, S['th']) for t in ['Étape', 'Tactique', 'Techniques', 'Constats']]
+    rows = [hdr]
+    for step in chain:
+        techs = _attack_items(step.get('techniques'), _TECH_ID_RE)
+        sev = str(step.get('max_severity') or 'INFO').upper()
+        sc = SEV_C.get(sev, C_MUTED)
+        rows.append([
+            Paragraph(f"<b>{_safe(step.get('order', ''))}.</b> {_safe(step.get('label', ''))}<br/>"
+                      f"<font color=\"{_hex(sc)}\"><b>{_safe(sev)}</b></font>", S['td']),
+            Paragraph(f"{_safe(step.get('tactic', ''))}<br/><font name=\"Courier\">{_safe(step.get('tactic_id', ''))}</font>",
+                      S['td']),
+            Paragraph('<br/>'.join(techs) or '—', S['td']),
+            Paragraph(_safe(', '.join(str(x) for x in (step.get('finding_ids') or [])[:12])), S['td']),
+        ])
+
+    tbl = Table(rows, colWidths=[3.4*cm, 3.2*cm, 7*cm, 2.9*cm])
+    tbl.setStyle(TableStyle(list(_BASE_TBL_STYLE) + [
+        ('BACKGROUND', (0, 0), (-1, 0), C_DARK),
+        ('VALIGN',     (0, 0), (-1, -1), 'TOP'),
+    ] + _alt_rows(len(rows))))
+    story.append(tbl)
+    story.append(Spacer(1, 0.4*cm))
 
 
 def _build_strengths(story: list, analysis: dict) -> None:
@@ -1823,6 +1897,70 @@ def _build_methodology(story: list, scan_data: dict, timing: dict = None,
             S['small'],
         ))
 
+    _build_agent_journal(story, d)
+
+
+def _build_agent_journal(story: list, d: dict) -> None:
+    """
+    Journal des pivots choisis par la boucle agent (phase 8,
+    ``scan_results["agent_pivots"]``) : chaque décision, sa raison et son
+    issue, refus de périmètre compris. Rien si la boucle n'a pas tourné.
+    """
+    entry = d.get('agent_pivots') if isinstance(d, dict) else None
+    if not isinstance(entry, dict):
+        return
+    data = entry.get('data') if isinstance(entry.get('data'), dict) else {}
+
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph('<b>Pivots choisis par l\'agent IA</b>', S['h2']))
+    if entry.get('status') == 'skipped' or data.get('status') == 'skipped':
+        reason = entry.get('error') or data.get('stop_reason') or 'désactivée'
+        story.append(Paragraph(f'Boucle agent non exécutée : {_safe(str(reason)[:200])}.', S['small']))
+        return
+
+    backend = data.get('backend') if isinstance(data.get('backend'), dict) else {}
+    usage = data.get('usage') if isinstance(data.get('usage'), dict) else {}
+    budget = data.get('budget') if isinstance(data.get('budget'), dict) else {}
+    story.append(Paragraph(
+        f'Modèle : <b>{_safe(backend.get("name"))}</b> ({_safe(backend.get("model"))}) · '
+        f'arrêt : {_safe(data.get("stop_reason"))} · '
+        f'{_safe(usage.get("pivots_executed", 0))} pivot(s) exécuté(s), '
+        f'{_safe(usage.get("pivots_refused", 0))} refusé(s), '
+        f'budget {_safe(budget.get("max_pivots"))} pivots / profondeur {_safe(budget.get("max_depth"))}. '
+        f'L\'agent ne peut appeler que des outils passifs d\'une liste blanche, sur des cibles '
+        f'déjà observées dans le périmètre déclaré.',
+        S['small'],
+    ))
+    decisions = [x for x in (data.get('decisions') or []) if isinstance(x, dict)][:40]
+    if not decisions:
+        return
+    story.append(Spacer(1, 0.2*cm))
+    rows = [[Paragraph(t, S['th']) for t in ('#', 'Outil', 'Cible', 'Raison', 'Issue')]]
+    for x in decisions:
+        args = x.get('arguments') if isinstance(x.get('arguments'), dict) else {}
+        target = ', '.join(f'{v}' for k, v in args.items() if k != 'reason')[:80]
+        refusal = x.get('refusal') if isinstance(x.get('refusal'), dict) else None
+        outcome = x.get('outcome') or '—'
+        if refusal:
+            outcome = f'refusé ({refusal.get("code")})'
+        elif x.get('result_status'):
+            outcome = f'{outcome} · {x.get("result_status")}'
+        rows.append([
+            Paragraph(_safe(x.get('seq')), S['td_c']),
+            Paragraph(_safe(x.get('tool')), S['mono']),
+            Paragraph(_safe(target), S['mono']),
+            Paragraph(_safe(str(x.get('reason') or '')[:240]), S['td']),
+            Paragraph(_safe(str(outcome)[:60]), S['td']),
+        ])
+    tbl = Table(rows, colWidths=[0.8*cm, 3*cm, 4*cm, None, 3*cm], repeatRows=1)
+    tbl.setStyle(TableStyle(
+        list(_BASE_TBL_STYLE) + [
+            ('BACKGROUND', (0, 0), (-1, 0), C_NAVY),
+            ('VALIGN',     (0, 0), (-1, -1), 'TOP'),
+        ] + _alt_rows(len(rows))
+    ))
+    story.append(tbl)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  POINT D'ENTRÉE PUBLIC
@@ -1835,7 +1973,7 @@ def generate_pdf(
     scan_data: Optional[dict] = None,
 ) -> bytes:
     """
-    Génère le rapport PDF Recon IA complet.
+    Génère le rapport PDF ReconIA complet.
 
     Args:
         analysis  : dict retourné par /analyze (champ ``data``)
@@ -1861,20 +1999,27 @@ def generate_pdf(
         topMargin=1.6*cm,       # espace pour le header des pages contenu
         bottomMargin=1.4*cm,    # espace pour le footer
         title=f'Rapport OSINT — {domain}',
-        author='Recon IA',
+        author='ReconIA',
         subject='Rapport de Sécurité OSINT',
-        creator='Recon IA Platform — idachallenge.bj',
+        creator='ReconIA — De la donnée à la décision — idachallenge.bj',
     )
     # Transmettre le domaine au callback _page_content via l'objet doc
     doc._report_domain = str(domain)
 
+    # Phase 4 : constats annotés (techniques rendues possibles, mitigations)
+    # et chaîne d'attaque, recalculés par la table déterministe.
+    analysis = _with_attack(analysis)
+
     story: list = []
     _build_cover(story, analysis, recon, timing)
-    _build_summary(story, analysis)
+    _build_contents(story)
+    _build_summary(story, analysis, scan_data or {})
+    _build_exposure_maps(story, analysis, scan_data or {})
     _build_infrastructure(story, scan_data or {})   # ← NOUVEAU : présentation infra avant l'analyse
     _build_findings(story, analysis)
     _build_attack_surface(story, analysis)
     _build_mitre_attack(story, analysis)
+    _build_attack_chain(story, analysis)
     _build_strengths(story, analysis)
     _build_actions(story, analysis)
     _build_metadata(story, analysis, recon, timing)

@@ -1,0 +1,20 @@
+{
+  "id": "typosquatting",
+  "titre": "Typosquatting — domaines ressemblants",
+  "categorie": "Réputation",
+  "outils": ["typosquatting"],
+  "pourquoi": "Des attaquants enregistrent des noms proches du vôtre (lettre inversée, doublée, caractère visuellement identique, autre extension) pour tromper vos clients et employés. Recon-IA génère ces variantes et vérifie lesquelles sont réellement enregistrées, en particulier celles équipées d'un serveur de messagerie (MX), signe d'une possible campagne d'hameçonnage.",
+  "risque": "Un domaine ressemblant doté d'un MX permet d'envoyer des courriels très crédibles (fausses factures, changement de RIB) qui ne seront pas bloqués par votre propre DMARC, puisqu'il s'agit d'un autre domaine. Il peut aussi héberger une copie de votre site pour voler des identifiants.",
+  "comment_corriger": [
+    "Surveiller régulièrement les domaines ressemblants nouvellement enregistrés.",
+    "Enregistrer de manière défensive les variantes les plus évidentes et les extensions principales.",
+    "Signaler les domaines frauduleux au bureau d'enregistrement et aux services anti-hameçonnage.",
+    "Sensibiliser les équipes comptables et le support aux demandes inhabituelles par courriel."
+  ],
+  "references": [
+    {"titre": "CAPEC-630 — TypoSquatting", "url": "https://capec.mitre.org/data/definitions/630.html"},
+    {"titre": "CAPEC-632 — Homograph Attack via Homoglyphs", "url": "https://capec.mitre.org/data/definitions/632.html"},
+    {"titre": "dnstwist", "url": "https://github.com/elceef/dnstwist"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

@@ -38,6 +38,10 @@ TEST_ENV = {
     'SMTP_PASSWORD': 'smtppass',
     'SMTP_SERVER': 'smtp.example.com',
     'SMTP_PORT': '587',
+    # Secret du coffre des résultats (utils/result_vault.py) — stable pour
+    # toute la suite, ≥ 32 caractères.
+    'RESULTS_ACCESS_SECRET': 'test-results-access-secret-0123456789abcdef',
+    'RESULTS_PAGE_URL': 'https://recon.example.test/result.html',
 }
 os.environ.update(TEST_ENV)
 

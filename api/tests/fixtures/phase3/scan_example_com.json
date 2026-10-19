@@ -1,0 +1,91 @@
+{
+  "_comment": "Résultats bruts de référence (forme réelle des outils de routes/recon.py) pour un domaine sain de type example.com : SPF -all, DMARC p=reject, DNSSEC actif, certificat valide, HSTS et quelques en-têtes absents. Aucun réseau.",
+  "domain": "example.com",
+  "cache": {"cached_at": "2026-10-19T10:42:00", "scan_duration_s": 211.4},
+  "dns_records": {
+    "status": "success",
+    "meta": {"tool": "DNS Records", "category": "DNS / Réseau"},
+    "data": {"A": ["93.184.215.14"], "NS": ["a.iana-servers.net", "b.iana-servers.net"], "MX": []},
+    "raw_output": "example.com. IN A 93.184.215.14\nexample.com. IN NS a.iana-servers.net."
+  },
+  "dnssec": {
+    "status": "success",
+    "meta": {"tool": "DNSSEC", "category": "DNS / Sécurité"},
+    "data": {"enabled": true, "has_dnskey": true, "has_ds": true, "security_note": "Zone signée"},
+    "raw_output": "DNSKEY présent, DS présent"
+  },
+  "email_config": {
+    "status": "success",
+    "meta": {"tool": "Email Config", "category": "Email / Messagerie"},
+    "data": {"mx": [], "spf": "v=spf1 -all", "spf_status": "found", "dmarc": "v=DMARC1;p=reject;sp=reject;adkim=s;aspf=s", "dmarc_status": "found", "dmarc_policy": "reject", "security_score": "4/6", "security_level": "Bon"},
+    "raw_output": ";; SPF\nexample.com. IN TXT \"v=spf1 -all\"\n\n;; DMARC\n_dmarc.example.com. IN TXT \"v=DMARC1;p=reject;sp=reject;adkim=s;aspf=s\""
+  },
+  "spf_analysis": {
+    "status": "success",
+    "meta": {"tool": "SPF Analysis", "category": "Email / Messagerie"},
+    "data": {"includes_tree": {}, "mechanisms": [{"domain": "example.com", "mechanism": "-all"}], "all_mechanism": "-all", "all_risk": "HardFail — rejet strict des emails non autorisés (protection maximale)", "lookup_count": 1, "lookup_limit_warning": false},
+    "raw_output": "example.com: v=spf1 -all"
+  },
+  "dmarc_check": {
+    "status": "success",
+    "meta": {"tool": "DMARC", "category": "Email / Messagerie"},
+    "data": {"present": true, "record": "v=DMARC1;p=reject;sp=reject;adkim=s;aspf=s", "policy": "reject", "percentage": 100, "report_address": null},
+    "raw_output": "_dmarc.example.com. IN TXT \"v=DMARC1;p=reject;sp=reject;adkim=s;aspf=s\""
+  },
+  "ssl_info": {
+    "status": "success",
+    "meta": {"tool": "SSL Info", "category": "SSL / TLS"},
+    "data": {"issuer": {"organizationName": "DigiCert Inc"}, "days_until_expiry": 120, "expired": false, "expiry_warning": false, "tls_version": "TLSv1.3"},
+    "raw_output": "Issuer : DigiCert Inc\nDays Until Exp : 120\nTLS Version : TLSv1.3"
+  },
+  "tls_config": {
+    "status": "success",
+    "meta": {"tool": "TLS Config", "category": "SSL / TLS"},
+    "data": {"weak_protocols": [], "weak_ciphers": []},
+    "raw_output": "TLSv1.2 TLSv1.3 acceptés"
+  },
+  "security_headers": {
+    "status": "success",
+    "meta": {"tool": "Security Headers", "category": "Web / Sécurité"},
+    "data": {
+      "grade": "D", "score": 4, "max_score": 13,
+      "missing_headers": ["HSTS", "CSP", "Referrer-Policy", "Permissions-Policy", "X-XSS-Protection", "COOP", "CORP"],
+      "headers": {
+        "strict-transport-security": {"name": "HSTS", "present": false, "value": null, "valid": false},
+        "content-security-policy": {"name": "CSP", "present": false, "value": null, "valid": false},
+        "x-frame-options": {"name": "X-Frame-Options", "present": true, "value": "DENY", "valid": true},
+        "x-content-type-options": {"name": "X-Content-Type-Options", "present": true, "value": "nosniff", "valid": true},
+        "referrer-policy": {"name": "Referrer-Policy", "present": false, "value": null, "valid": false},
+        "permissions-policy": {"name": "Permissions-Policy", "present": false, "value": null, "valid": false},
+        "x-xss-protection": {"name": "X-XSS-Protection", "present": false, "value": null, "valid": false},
+        "cross-origin-opener-policy": {"name": "COOP", "present": false, "value": null, "valid": false},
+        "cross-origin-resource-policy": {"name": "CORP", "present": false, "value": null, "valid": false}
+      }
+    },
+    "raw_output": "HTTP 200 HTTPS\n\nContent-Type: text/html\nX-Frame-Options: DENY\nX-Content-Type-Options: nosniff"
+  },
+  "dnsbl_check": {
+    "status": "success",
+    "meta": {"tool": "DNSBL", "category": "Réputation / Threat Intel"},
+    "data": {"listed": [], "listed_count": 0, "clean": true, "risk_level": "clean"},
+    "raw_output": "clean    93.184.215.14 not in Spamhaus ZEN"
+  },
+  "shodan_internetdb": {
+    "status": "success",
+    "meta": {"tool": "Shodan InternetDB", "category": "Vulnérabilités / OSINT"},
+    "data": {"ports": [80, 443], "cpes": [], "vulns": [], "vulns_enriched": [], "tags": [], "hostnames": ["example.com"]},
+    "raw_output": "=== InternetDB 93.184.215.14 (HTTP 200) ===\n{\"ports\":[80,443],\"vulns\":[]}"
+  },
+  "caa_check": {
+    "status": "success",
+    "meta": {"tool": "CAA", "category": "DNS / Sécurité"},
+    "data": {"present": true, "records": ["0 issue \"digicert.com\""]},
+    "raw_output": "example.com. IN CAA 0 issue \"digicert.com\""
+  },
+  "subdomain_takeover": {
+    "status": "success",
+    "meta": {"tool": "Subdomain Takeover", "category": "Vulnérabilités / OSINT"},
+    "data": {"vulnerable": [], "vulnerable_count": 0, "checked_count": 3, "risk_level": "none"},
+    "raw_output": "Aucun CNAME dangling détecté"
+  }
+}

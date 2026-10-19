@@ -152,6 +152,10 @@ def _extract_analysis_summary(analysis: Dict[str, Any]) -> Dict[str, Any]:
             "id":             f.get("id"),
             "category":       f.get("category"),
             "severity":       f.get("severity"),
+            # Phase 3 : sévérité tranchée par règle, confiance et date du constat
+            "severity_rule":  f.get("severity_rule"),
+            "confidence":     f.get("confidence"),
+            "observed_at":    f.get("observed_at"),
             "title":          f.get("title"),
             "description":    f.get("description"),
             "recommendation": f.get("recommendation"),

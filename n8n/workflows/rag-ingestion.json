@@ -134,6 +134,42 @@
     },
     {
       "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7a1c0e52-6b1d-4f0e-9a3c-1d2e3f4a5b60",
+              "name": "data",
+              "value": "={{ $json.data }}",
+              "type": "string"
+            },
+            {
+              "id": "7a1c0e52-6b1d-4f0e-9a3c-1d2e3f4a5b61",
+              "name": "source",
+              "value": "={{ String($('Read/Write Files from Disk').item.json.fileName || (($('Read/Write Files from Disk').item.binary || {}).data || {}).fileName || '').split('/').pop() }}",
+              "type": "string"
+            },
+            {
+              "id": "7a1c0e52-6b1d-4f0e-9a3c-1d2e3f4a5b62",
+              "name": "collection",
+              "value": "={{ (n => n.includes('mitre_attack') ? 'attack' : n.includes('combined_cisa') ? 'menaces' : n.includes('combined_explications') ? 'explications' : 'normes')(String($('Read/Write Files from Disk').item.json.fileName || (($('Read/Write Files from Disk').item.binary || {}).data || {}).fileName || '').split('/').pop().toLowerCase()) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        -16
+      ],
+      "id": "8b2d1f63-7c2e-4a1f-8b4d-2e3f4a5b6c71",
+      "name": "Métadonnées RAG (collection)",
+      "notes": "Phase 6 : pose metadata.source (nom du fichier) et metadata.collection (normes | attack | menaces | explications). Règle identique à api/utils/rag_collections.py et data/sql/reindex_collections.sql (vérifié par tests/test_phase6_collections.py)."
+    },
+    {
+      "parameters": {
         "model": "nomic-embed-text:v1.5"
       },
       "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
@@ -153,8 +189,23 @@
     },
     {
       "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.data }}",
         "textSplittingMode": "custom",
-        "options": {}
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "={{ $json.source }}"
+              },
+              {
+                "name": "collection",
+                "value": "={{ $json.collection }}"
+              }
+            ]
+          }
+        }
       },
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1.1,
@@ -255,6 +306,17 @@
       ]
     },
     "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Métadonnées RAG (collection)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Métadonnées RAG (collection)": {
       "main": [
         [
           {

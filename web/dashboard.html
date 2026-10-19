@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Recon IA — Dashboard</title>
+    <title>ReconIA — Administration</title>
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32.png">
+    <link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png">
+    <meta name="theme-color" content="#0A1F44">
 
     <!-- connect-src autorise http: en plus de https: — DASHBOARD_API_BASE (voir
          config.js / CLAUDE.md) peut pointer vers une API locale en clair
@@ -16,41 +20,101 @@
         font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:;
         img-src 'self' data: https:;
         connect-src 'self' http: https:;
-        frame-ancestors 'none';
         base-uri 'self';
         form-action 'none';
     ">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <meta http-equiv="X-Frame-Options" content="DENY">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="robots" content="noindex, nofollow">
 
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <!-- Phase 7 (graphe, différentiel, surveillance) : style et script dans
+         des fichiers dédiés, aucun nouveau style/script inline. -->
+    <link rel="stylesheet" href="dashboard-graph.css">
 
+    <script src="theme.js"></script>
     <style>
         :root {
-            --bg:        #020817;
-            --bg2:       #060f1e;
+            --bg:        #061127;
+            --bg2:       #08152E;
             --card:      rgba(8, 18, 36, 0.97);
-            --border:    rgba(0, 212, 255, 0.18);
-            --border2:   rgba(0, 212, 255, 0.08);
-            --cyan:      #00d4ff;
-            --cyan-dim:  rgba(0, 212, 255, 0.12);
+            --border:    rgba(0, 200, 240, 0.18);
+            --border2:   rgba(0, 200, 240, 0.08);
+            --cyan:      #00C8F0;
+            --cyan-dim:  rgba(0, 200, 240, 0.12);
             --green:     #00ff88;
-            --purple:    #7c3aed;
+            --purple:    #0B5BD3;
             --red:       #f43f5e;
             --orange:    #f59e0b;
             --text:      #cbd5e1;
             --text-dim:  #64748b;
             --text-bright: #e2e8f0;
+            --text-mid:  #94a3b8;
+            --surface-solid: #08152E;
+            --panel:     rgba(6, 15, 30, 0.97);
+            --page-bg:   radial-gradient(ellipse at 20% 0%, #0d1b2a 0%, #061127 55%, #0a0f1e 100%);
+            --ok-text:   #34D399;
+            --violet-text: #a78bfa;
+            --blue-text: #6EA8FF;
+            --shadow-strong: rgba(0, 0, 0, 0.5);
+            --input-bg:  rgba(2, 8, 23, 0.8);
+            --input-border: rgba(0, 200, 240, 0.2);
             --radius:    12px;
             --transition: all 0.25s ease;
+        }
+        :root[data-theme="light"] {
+            --bg:        #F5F8FD;
+            --bg2:       #EEF3FB;
+            --card:      rgba(255, 255, 255, 0.98);
+            --border:    rgba(10, 31, 68, 0.12);
+            --border2:   rgba(10, 31, 68, 0.06);
+            --cyan:      #0B5BD3;
+            --cyan-dim:  rgba(11, 91, 211, 0.10);
+            --green:     #0E9F6E;
+            --purple:    #0B5BD3;
+            --red:       #D92D20;
+            --orange:    #B7791F;
+            --text:      #1E2A44;
+            --text-dim:  #5B6B86;
+            --text-bright: #0A1F44;
+            --text-mid:  #4A5872;
+            --surface-solid: #FFFFFF;
+            --panel:     rgba(255, 255, 255, 0.98);
+            --page-bg:   radial-gradient(ellipse at 20% 0%, #E6F0FF 0%, #F5F8FD 55%, #EEF3FB 100%);
+            --ok-text:   #0E9F6E;
+            --violet-text: #1677F2;
+            --blue-text: #1677F2;
+            --shadow-strong: rgba(10, 31, 68, 0.12);
+            --input-bg:  #FFFFFF;
+            --input-border: rgba(10, 31, 68, 0.18);
+        }
+        .theme-switching, .theme-switching *, .theme-switching *::before, .theme-switching *::after {
+            transition: background-color .35s ease, color .35s ease, border-color .35s ease !important;
+        }
+        .theme-toggle-dash {
+            width: 36px; height: 36px; border-radius: 10px; cursor: pointer; overflow: hidden;
+            border: 1px solid var(--border); background: var(--bg2); color: var(--text-bright);
+            display: inline-grid; place-items: center; transition: transform .2s ease, border-color .2s ease;
+        }
+        .theme-toggle-dash:hover { transform: rotate(-10deg); border-color: var(--cyan); }
+        .theme-toggle-dash i { grid-area: 1 / 1; transition: transform .45s cubic-bezier(.2,.8,.2,1), opacity .3s ease; }
+        .theme-toggle-dash .icon-sun { color: #F2B84B; }
+        .theme-toggle-dash .icon-moon { color: var(--cyan); opacity: 0; transform: translateY(120%) rotate(-90deg); }
+        :root[data-theme="light"] .theme-toggle-dash .icon-sun { opacity: 0; transform: translateY(-120%) rotate(90deg); }
+        :root[data-theme="light"] .theme-toggle-dash .icon-moon { opacity: 1; transform: none; }
+        .login-theme { position: absolute; top: 18px; right: 18px; }
+        @keyframes dash-fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+        .login-card { animation: dash-fade-up .6s cubic-bezier(.2,.7,.2,1) both; }
+        .login-brand { animation: dash-float 6s 1s ease-in-out infinite; }
+        @keyframes dash-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .001ms !important; animation-delay: 0s !important; transition-duration: .001ms !important; }
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
-            background: radial-gradient(ellipse at 20% 0%, #0d1b2a 0%, #020817 55%, #0a0f1e 100%);
+            background: var(--page-bg);
             background-attachment: fixed;
             color: var(--text);
             min-height: 100vh;
@@ -61,8 +125,8 @@
             position: fixed;
             inset: 0;
             background:
-                linear-gradient(rgba(0, 212, 255, 0.04) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 212, 255, 0.04) 1px, transparent 1px);
+                linear-gradient(rgba(0, 200, 240, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 200, 240, 0.04) 1px, transparent 1px);
             background-size: 44px 44px;
             pointer-events: none;
             z-index: 0;
@@ -73,18 +137,18 @@
             position: fixed; inset: 0; display: flex;
             align-items: center; justify-content: center;
             z-index: 100;
-            background: radial-gradient(ellipse at 20% 0%, #0d1b2a 0%, #020817 55%, #0a0f1e 100%);
+            background: var(--page-bg);
         }
         .login-card {
             background: var(--card); border: 1px solid var(--border);
             border-radius: 20px; padding: 2.5rem;
-            width: 100%; max-width: 420px;
-            box-shadow: 0 0 60px rgba(0,212,255,0.08), 0 30px 60px rgba(0,0,0,0.5);
+            width: 100%; max-width: 420px; position: relative;
+            box-shadow: 0 0 60px rgba(0,200,240,0.08), 0 30px 60px var(--shadow-strong);
         }
         .login-logo { text-align: center; margin-bottom: 2rem; }
         .login-logo .icon-wrap {
             width: 64px; height: 64px; border-radius: 16px;
-            background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(124,58,237,0.2));
+            background: linear-gradient(135deg, rgba(0,200,240,0.2), rgba(11,91,211,0.2));
             border: 1px solid var(--border);
             display: flex; align-items: center; justify-content: center;
             font-size: 1.75rem; color: var(--cyan); margin: 0 auto 1rem;
@@ -99,21 +163,21 @@
                           color: var(--text-dim); font-size: 0.85rem; pointer-events: none; }
         .form-input {
             width: 100%; padding: 0.7rem 1rem 0.7rem 2.5rem;
-            background: rgba(2,8,23,0.8); border: 1px solid rgba(0,212,255,0.2);
+            background: var(--input-bg); border: 1px solid var(--input-border);
             border-radius: 8px; color: var(--text-bright); font-family: 'Inter', sans-serif;
             font-size: 0.88rem; transition: border-color 0.2s;
         }
         .form-input:focus { outline: none; border-color: var(--cyan); }
         .btn-login {
             width: 100%; padding: 0.8rem;
-            background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(124,58,237,0.15));
+            background: linear-gradient(135deg, rgba(0,200,240,0.15), rgba(11,91,211,0.15));
             border: 1px solid var(--border); border-radius: 8px;
             color: var(--cyan); font-family: 'Inter', sans-serif;
             font-size: 0.88rem; font-weight: 600; cursor: pointer;
             transition: var(--transition); display: flex; align-items: center;
             justify-content: center; gap: 0.5rem;
         }
-        .btn-login:hover { background: rgba(0,212,255,0.2); transform: translateY(-1px); }
+        .btn-login:hover { background: rgba(0,200,240,0.2); transform: translateY(-1px); }
         .login-error {
             display: none; margin-top: 1rem; padding: 0.6rem 0.9rem;
             background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.25);
@@ -125,30 +189,34 @@
         .dash-header {
             display: flex; align-items: center; justify-content: space-between;
             padding: 0 2rem; height: 60px; border-bottom: 1px solid var(--border2);
-            background: rgba(6,15,30,0.97); backdrop-filter: blur(8px);
+            background: var(--panel); backdrop-filter: blur(8px);
             position: sticky; top: 0; z-index: 20;
         }
         .dash-logo { display: flex; align-items: center; gap: 0.65rem;
                       font-size: 0.95rem; font-weight: 700; color: var(--text-bright); }
         .dash-logo i { color: var(--cyan); font-size: 1.1rem; }
+        .dash-brand { width: 30px; height: auto; display: block; }
+        .login-brand { width: 88px; height: auto; display: block; margin: 0 auto 0.75rem; }
+        .brand-ia { background: linear-gradient(135deg, #1677F2, #00C8F0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .login-logo h1, .dash-logo span { font-family: 'Montserrat', 'Inter', sans-serif; font-weight: 800; }
         .dash-actions { display: flex; align-items: center; gap: 0.6rem; }
         .api-badge {
             font-family: 'Fira Code', monospace; font-size: 0.72rem;
-            padding: 0.2rem 0.65rem; background: rgba(0,212,255,0.06);
+            padding: 0.2rem 0.65rem; background: rgba(0,200,240,0.06);
             border: 1px solid var(--border2); border-radius: 4px; color: var(--text-dim);
         }
         .btn-icon {
             padding: 0.4rem 0.85rem;
-            background: rgba(0,212,255,0.07); border: 1px solid rgba(0,212,255,0.18);
+            background: rgba(0,200,240,0.07); border: 1px solid rgba(0,200,240,0.18);
             border-radius: 6px; color: var(--text); font-size: 0.78rem;
             font-family: 'Inter', sans-serif; cursor: pointer; transition: var(--transition);
             display: flex; align-items: center; gap: 0.35rem;
         }
-        .btn-icon:hover { background: rgba(0,212,255,0.14); color: var(--cyan); }
-        .btn-icon.active { background: rgba(0,212,255,0.18); color: var(--cyan); }
+        .btn-icon:hover { background: rgba(0,200,240,0.14); color: var(--cyan); }
+        .btn-icon.active { background: rgba(0,200,240,0.18); color: var(--cyan); }
         .dash-tabs {
             display: flex; border-bottom: 1px solid var(--border);
-            background: rgba(6,15,30,0.97); padding: 0 2rem;
+            background: var(--panel); padding: 0 2rem;
             position: sticky; top: 60px; z-index: 19; backdrop-filter: blur(8px);
         }
         .dash-tab {
@@ -168,7 +236,7 @@
         /* ── BANDEAU MÉTHODOLOGIE ────────────────────────── */
         .methodology-banner {
             display: flex; align-items: flex-start; gap: 0.6rem;
-            background: rgba(0,212,255,0.05); border: 1px solid var(--border2);
+            background: rgba(0,200,240,0.05); border: 1px solid var(--border2);
             border-left: 3px solid var(--cyan);
             border-radius: var(--radius); padding: 0.7rem 1rem;
             margin-bottom: 1.25rem;
@@ -187,7 +255,7 @@
         .tool-raw > summary::-webkit-details-marker { display: none; }
         .tool-raw > summary::before { content: '▸'; color: var(--cyan); font-size: 0.7rem; }
         .tool-raw[open] > summary::before { content: '▾'; }
-        .tool-raw > summary:hover { background: rgba(0,212,255,0.04); }
+        .tool-raw > summary:hover { background: rgba(0,200,240,0.04); }
         .tool-key {
             font-family: 'Fira Code', monospace; color: var(--cyan); font-size: 0.74rem;
         }
@@ -220,7 +288,7 @@
         .finding-desc { font-size: 0.75rem; color: var(--text-dim); line-height: 1.5; }
         .src-tool-badge {
             font-family: 'Fira Code', monospace; font-size: 0.66rem;
-            background: rgba(0,212,255,0.1); border: 1px solid var(--border);
+            background: rgba(0,200,240,0.1); border: 1px solid var(--border);
             color: var(--cyan); padding: 1px 6px; border-radius: 4px;
         }
         /* Contrôle d'ancrage (grounding check) — voir utils/grounding_check.py */
@@ -228,12 +296,12 @@
             font-size: 0.66rem; padding: 1px 6px; border-radius: 4px;
             border: 1px solid transparent; white-space: nowrap;
         }
-        .grounding-badge.verified            { background: rgba(34,197,94,0.12);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
+        .grounding-badge.verified            { background: rgba(34,197,94,0.12);  color: var(--ok-text); border-color: rgba(34,197,94,0.3); }
         .grounding-badge.evidence_not_found  { background: rgba(244,63,94,0.12);  color: #f43f5e; border-color: rgba(244,63,94,0.3); }
         .grounding-badge.unknown_tool        { background: rgba(244,63,94,0.12);  color: #f43f5e; border-color: rgba(244,63,94,0.3); }
         .grounding-badge.tool_not_successful { background: rgba(245,158,11,0.12); color: #f59e0b; border-color: rgba(245,158,11,0.3); }
-        .grounding-badge.no_source_cited     { background: rgba(148,163,184,0.12); color: #94a3b8; border-color: rgba(148,163,184,0.3); }
-        .grounding-badge.no_evidence_text    { background: rgba(148,163,184,0.12); color: #94a3b8; border-color: rgba(148,163,184,0.3); }
+        .grounding-badge.no_source_cited     { background: rgba(148,163,184,0.12); color: var(--text-mid); border-color: rgba(148,163,184,0.3); }
+        .grounding-badge.no_evidence_text    { background: rgba(148,163,184,0.12); color: var(--text-mid); border-color: rgba(148,163,184,0.3); }
 
         /* ── STATS GRID ──────────────────────────────────── */
         /* Max 4 cartes par ligne (demande explicite) — un compte fixe de
@@ -257,12 +325,12 @@
             width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center; font-size: 1rem;
         }
-        .stat-icon.cyan   { background: rgba(0,212,255,0.12);   color: var(--cyan);   }
+        .stat-icon.cyan   { background: rgba(0,200,240,0.12);   color: var(--cyan);   }
         .stat-icon.green  { background: rgba(0,255,136,0.12);   color: var(--green);  }
         .stat-icon.orange { background: rgba(245,158,11,0.12);  color: var(--orange); }
         .stat-icon.red    { background: rgba(244,63,94,0.12);   color: var(--red);    }
-        .stat-icon.purple { background: rgba(124,58,237,0.12);  color: #a78bfa;       }
-        .stat-icon.blue   { background: rgba(99,102,241,0.12);  color: #818cf8;       }
+        .stat-icon.purple { background: rgba(11,91,211,0.12);  color: var(--violet-text);       }
+        .stat-icon.blue   { background: rgba(22,119,242,0.12);  color: var(--blue-text);       }
         .stat-value { font-size: 1.45rem; font-weight: 700; color: var(--text-bright); line-height: 1; }
         .stat-label { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.3rem;
                        text-transform: uppercase; letter-spacing: 0.05em; }
@@ -285,13 +353,13 @@
         .logs-title i { color: var(--cyan); }
         .logs-filters { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
         .filter-select {
-            background: rgba(2,8,23,0.8); border: 1px solid rgba(0,212,255,0.2);
+            background: var(--input-bg); border: 1px solid var(--input-border);
             border-radius: 6px; color: var(--text); padding: 0.35rem 0.65rem;
             font-family: 'Inter', sans-serif; font-size: 0.8rem; cursor: pointer;
         }
         .filter-select:focus { outline: none; border-color: var(--cyan); }
         .filter-input {
-            background: rgba(2,8,23,0.8); border: 1px solid rgba(0,212,255,0.2);
+            background: var(--input-bg); border: 1px solid var(--input-border);
             border-radius: 6px; color: var(--text); padding: 0.35rem 0.75rem;
             font-family: 'Fira Code', monospace; font-size: 0.78rem;
             width: 180px; transition: border-color 0.2s;
@@ -302,7 +370,7 @@
         /* ── TABLE ───────────────────────────────────────── */
         .table-wrap { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; }
-        thead { background: rgba(0,212,255,0.04); }
+        thead { background: rgba(0,200,240,0.04); }
         th {
             padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem;
             font-weight: 600; color: var(--text-dim); text-transform: uppercase;
@@ -310,10 +378,10 @@
         }
         td {
             padding: 0.65rem 1rem; font-size: 0.82rem; color: var(--text);
-            border-bottom: 1px solid rgba(0,212,255,0.04);
+            border-bottom: 1px solid rgba(0,200,240,0.04);
             white-space: nowrap; font-family: 'Fira Code', monospace;
         }
-        tr:hover td { background: rgba(0,212,255,0.025); }
+        tr:hover td { background: rgba(0,200,240,0.025); }
 
         /* ── BADGES ──────────────────────────────────────── */
         .badge {
@@ -321,23 +389,23 @@
             border-radius: 5px; font-size: 0.72rem; font-weight: 600;
             font-family: 'Fira Code', monospace;
         }
-        .badge-method-GET    { background: rgba(0,212,255,0.1);  color: var(--cyan);   }
+        .badge-method-GET    { background: rgba(0,200,240,0.1);  color: var(--cyan);   }
         .badge-method-POST   { background: rgba(0,255,136,0.1);  color: var(--green);  }
         .badge-method-PUT    { background: rgba(245,158,11,0.1); color: var(--orange); }
-        .badge-method-PATCH  { background: rgba(124,58,237,0.1); color: #a78bfa;       }
+        .badge-method-PATCH  { background: rgba(11,91,211,0.1); color: var(--violet-text);       }
         .badge-method-DELETE { background: rgba(244,63,94,0.1);  color: var(--red);    }
         .badge-2xx { background: rgba(0,255,136,0.1);  color: var(--green);  }
-        .badge-3xx { background: rgba(0,212,255,0.1);  color: var(--cyan);   }
+        .badge-3xx { background: rgba(0,200,240,0.1);  color: var(--cyan);   }
         .badge-4xx { background: rgba(245,158,11,0.1); color: var(--orange); }
         .badge-5xx { background: rgba(244,63,94,0.1);  color: var(--red);    }
-        .badge-pending { background: rgba(100,116,139,0.15); color: #94a3b8;      border: 1px solid rgba(100,116,139,0.2); }
-        .badge-running { background: rgba(0,212,255,0.12);   color: var(--cyan);  border: 1px solid rgba(0,212,255,0.25); }
+        .badge-pending { background: rgba(100,116,139,0.15); color: var(--text-mid);      border: 1px solid rgba(100,116,139,0.2); }
+        .badge-running { background: rgba(0,200,240,0.12);   color: var(--cyan);  border: 1px solid rgba(0,200,240,0.25); }
         .badge-success { background: rgba(0,255,136,0.12);   color: var(--green); border: 1px solid rgba(0,255,136,0.2);  }
         .badge-failed  { background: rgba(244,63,94,0.12);   color: var(--red);   border: 1px solid rgba(244,63,94,0.2);  }
 
         /* Grade colors */
-        .grade-A  { color: #00ff88; }
-        .grade-B  { color: #00d4ff; }
+        .grade-A  { color: var(--ok-text); }
+        .grade-B  { color: var(--cyan); }
         .grade-C  { color: #f59e0b; }
         .grade-D  { color: #f97316; }
         .grade-E, .grade-F { color: #f43f5e; }
@@ -405,7 +473,7 @@
         .section-sep-line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
         .section-badge { padding: 0.2rem 0.55rem; border-radius: 4px; font-size: 0.65rem; font-weight: 700; font-family: 'Fira Code', monospace; letter-spacing: 0.06em; }
         .section-badge.metier { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.2); }
-        .section-badge.tech   { background: rgba(0,212,255,0.1); color: var(--cyan);  border: 1px solid rgba(0,212,255,0.2); }
+        .section-badge.tech   { background: rgba(0,200,240,0.1); color: var(--cyan);  border: 1px solid rgba(0,200,240,0.2); }
 
         /* ── SCORE PILL ──────────────────────────────────── */
         .score-pill {
@@ -413,18 +481,18 @@
             padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.78rem; font-weight: 700;
             font-family: 'Fira Code', monospace; white-space: nowrap;
         }
-        .score-pill.green  { background: rgba(0,255,136,0.12); color: #00ff88; border: 1px solid rgba(0,255,136,0.2); }
-        .score-pill.cyan   { background: rgba(0,212,255,0.12); color: #00d4ff; border: 1px solid rgba(0,212,255,0.2); }
+        .score-pill.green  { background: rgba(0,255,136,0.12); color: var(--ok-text); border: 1px solid rgba(0,255,136,0.2); }
+        .score-pill.cyan   { background: rgba(0,200,240,0.12); color: var(--cyan); border: 1px solid rgba(0,200,240,0.2); }
         .score-pill.orange { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
         .score-pill.red    { background: rgba(244,63,94,0.12);  color: #f43f5e; border: 1px solid rgba(244,63,94,0.2);  }
-        .score-pill.dim    { background: rgba(100,116,139,0.1); color: #94a3b8; border: 1px solid rgba(100,116,139,0.15); }
+        .score-pill.dim    { background: rgba(100,116,139,0.1); color: var(--text-mid); border: 1px solid rgba(100,116,139,0.15); }
 
         /* ── RISK PILL ───────────────────────────────────── */
         .risk-CRITICAL { background: rgba(244,63,94,0.12);  color: #f43f5e; border: 1px solid rgba(244,63,94,0.25);  }
         .risk-HIGH     { background: rgba(249,115,22,0.12); color: #f97316; border: 1px solid rgba(249,115,22,0.25); }
         .risk-MEDIUM   { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25); }
-        .risk-LOW      { background: rgba(0,255,136,0.12);  color: #00ff88; border: 1px solid rgba(0,255,136,0.2);   }
-        .risk-INFO     { background: rgba(100,116,139,0.1); color: #94a3b8; border: 1px solid rgba(100,116,139,0.15); }
+        .risk-LOW      { background: rgba(0,255,136,0.12);  color: var(--ok-text); border: 1px solid rgba(0,255,136,0.2);   }
+        .risk-INFO     { background: rgba(100,116,139,0.1); color: var(--text-mid); border: 1px solid rgba(100,116,139,0.15); }
 
         /* ── ACTION BUTTONS ──────────────────────────────── */
         .btn-action {
@@ -432,8 +500,8 @@
             cursor: pointer; border: 1px solid transparent; transition: var(--transition);
             font-family: 'Inter', sans-serif; display: inline-flex; align-items: center; gap: 4px;
         }
-        .btn-eye  { background: rgba(0,212,255,0.08); border-color: rgba(0,212,255,0.2); color: var(--cyan); }
-        .btn-eye:hover  { background: rgba(0,212,255,0.18); }
+        .btn-eye  { background: rgba(0,200,240,0.08); border-color: rgba(0,200,240,0.2); color: var(--cyan); }
+        .btn-eye:hover  { background: rgba(0,200,240,0.18); }
         .btn-dl   { background: rgba(0,255,136,0.08); border-color: rgba(0,255,136,0.2); color: var(--green); }
         .btn-dl:hover   { background: rgba(0,255,136,0.18); }
         .btn-dl:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -449,8 +517,8 @@
         .sev-pill.CRITICAL { background: rgba(244,63,94,0.15); color: #f43f5e; }
         .sev-pill.HIGH     { background: rgba(249,115,22,0.15); color: #f97316; }
         .sev-pill.MEDIUM   { background: rgba(245,158,11,0.15); color: #f59e0b; }
-        .sev-pill.LOW      { background: rgba(99,102,241,0.15); color: #818cf8; }
-        .sev-pill.INFO     { background: rgba(100,116,139,0.1); color: #94a3b8; }
+        .sev-pill.LOW      { background: rgba(22,119,242,0.15); color: var(--blue-text); }
+        .sev-pill.INFO     { background: rgba(100,116,139,0.1); color: var(--text-mid); }
 
         /* ── MODAL ───────────────────────────────────────── */
         .modal-overlay {
@@ -461,7 +529,7 @@
         .modal-overlay.open { display: flex; }
         .modal-panel {
             width: min(760px, 100vw); height: 100vh; overflow-y: auto;
-            background: #060f1e; border-left: 1px solid var(--border);
+            background: var(--surface-solid); border-left: 1px solid var(--border);
             box-shadow: -30px 0 80px rgba(0,0,0,0.6);
             animation: slideIn 0.25s ease;
         }
@@ -469,17 +537,17 @@
         .modal-header {
             padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border2);
             display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
-            position: sticky; top: 0; background: #060f1e; z-index: 2;
+            position: sticky; top: 0; background: var(--surface-solid); z-index: 2;
         }
         .modal-title { font-size: 1rem; font-weight: 700; color: var(--text-bright); }
         .modal-subtitle { font-size: 0.78rem; color: var(--text-dim); margin-top: 0.2rem; }
         .modal-close {
             width: 32px; height: 32px; border-radius: 6px; cursor: pointer;
-            background: rgba(0,212,255,0.07); border: 1px solid var(--border2);
+            background: rgba(0,200,240,0.07); border: 1px solid var(--border2);
             color: var(--text-dim); display: flex; align-items: center; justify-content: center;
             flex-shrink: 0; transition: var(--transition); font-size: 1rem;
         }
-        .modal-close:hover { color: var(--text-bright); background: rgba(0,212,255,0.14); }
+        .modal-close:hover { color: var(--text-bright); background: rgba(0,200,240,0.14); }
         .modal-body { padding: 1.25rem 1.5rem; }
         .modal-section { margin-bottom: 1.5rem; }
         .modal-section-title {
@@ -491,7 +559,7 @@
         .modal-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
         .modal-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
         .info-item {
-            background: rgba(0,212,255,0.04); border: 1px solid var(--border2);
+            background: rgba(0,200,240,0.04); border: 1px solid var(--border2);
             border-radius: 8px; padding: 0.6rem 0.85rem;
         }
         .info-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); margin-bottom: 0.2rem; }
@@ -513,7 +581,7 @@
         .cat-bar-wrap { display: flex; flex-direction: column; gap: 8px; }
         .cat-bar { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; }
         .cat-bar-label { width: 65px; color: var(--text-dim); font-size: 0.72rem; flex-shrink: 0; }
-        .cat-bar-track { flex: 1; height: 5px; background: rgba(0,212,255,0.08); border-radius: 3px; overflow: hidden; }
+        .cat-bar-track { flex: 1; height: 5px; background: rgba(0,200,240,0.08); border-radius: 3px; overflow: hidden; }
         .cat-bar-fill  { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
         .cat-bar-val   { width: 30px; text-align: right; font-family: 'Fira Code', monospace; color: var(--text-dim); font-size: 0.72rem; }
 
@@ -521,13 +589,13 @@
         .narrative-text {
             font-size: 0.83rem; color: var(--text); line-height: 1.65;
             white-space: pre-wrap; word-break: break-word;
-            background: rgba(0,212,255,0.03); border: 1px solid var(--border2);
+            background: rgba(0,200,240,0.03); border: 1px solid var(--border2);
             border-radius: 8px; padding: 0.85rem;
         }
         .reco-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
         .reco-list li {
             display: flex; gap: 8px; font-size: 0.83rem; line-height: 1.5;
-            padding: 0.5rem 0.75rem; background: rgba(0,212,255,0.03);
+            padding: 0.5rem 0.75rem; background: rgba(0,200,240,0.03);
             border: 1px solid var(--border2); border-radius: 6px;
         }
         .reco-list li .reco-num {
@@ -546,17 +614,17 @@
         .modal-footer {
             padding: 1rem 1.5rem; border-top: 1px solid var(--border2);
             display: flex; gap: 0.75rem; justify-content: flex-end;
-            position: sticky; bottom: 0; background: #060f1e; z-index: 2;
+            position: sticky; bottom: 0; background: var(--surface-solid); z-index: 2;
         }
         .btn-primary {
             padding: 0.5rem 1.25rem;
-            background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(124,58,237,0.15));
+            background: linear-gradient(135deg, rgba(0,200,240,0.2), rgba(11,91,211,0.15));
             border: 1px solid var(--border); border-radius: 7px; color: var(--cyan);
             font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 600;
             cursor: pointer; transition: var(--transition);
             display: flex; align-items: center; gap: 6px;
         }
-        .btn-primary:hover { background: rgba(0,212,255,0.25); transform: translateY(-1px); }
+        .btn-primary:hover { background: rgba(0,200,240,0.25); transform: translateY(-1px); }
         .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
         .btn-secondary {
             padding: 0.5rem 1.25rem; background: rgba(100,116,139,0.1);
@@ -569,7 +637,7 @@
         .timing-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
         .timing-chip {
             display: flex; flex-direction: column; align-items: center;
-            background: rgba(0,212,255,0.04); border: 1px solid var(--border2);
+            background: rgba(0,200,240,0.04); border: 1px solid var(--border2);
             border-radius: 8px; padding: 0.5rem 1rem; min-width: 100px;
         }
         .timing-chip .tc-val { font-size: 1rem; font-weight: 700; color: var(--cyan); font-family: 'Fira Code', monospace; }
@@ -582,7 +650,31 @@
             .charts-grid { grid-template-columns: 1fr; }
             .modal-grid2, .modal-grid3 { grid-template-columns: 1fr; }
             .modal-panel { width: 100vw; }
+            /* En-tête compact : badge d'API masqué, libellés réduits aux icônes */
+            .dash-header { padding: 0 0.75rem; gap: 0.5rem; }
+            .api-badge, .dash-sub, .btn-label { display: none; }
+            .dash-actions { gap: 0.4rem; }
+            .btn-icon { min-height: 38px; min-width: 38px; justify-content: center; padding: 0.4rem 0.6rem; }
+            /* Onglets : une seule ligne qui défile horizontalement */
+            .dash-tabs { top: 60px; padding: 0 0.5rem; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+            .dash-tabs::-webkit-scrollbar { display: none; }
+            .dash-tab { white-space: nowrap; padding: 0.8rem 0.9rem; flex-shrink: 0; }
+            .table-wrap { -webkit-overflow-scrolling: touch; }
+            .card-header, .logs-header { flex-wrap: wrap; gap: 0.5rem; }
+            .filter-input, .filter-select { min-height: 38px; flex: 1 1 140px; min-width: 0; }
         }
+        @media (max-width: 420px) {
+            .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+            .stat-card { padding: 0.75rem; gap: 0.6rem; min-width: 0; }
+            .stat-card > * { min-width: 0; overflow-wrap: break-word; hyphens: auto; }
+            .stat-card .stat-icon { display: none; }
+            .stat-value { font-size: 1.25rem; }
+            .stat-label { font-size: 0.7rem; letter-spacing: 0.02em; }
+            .login-card { padding: 1.75rem 1.25rem; }
+            .dash-logo { font-size: 0.9rem; }
+        }
+        /* Une seule ligne de logo et d'actions sur tablette aussi */
+        @media (max-width: 1100px) and (min-width: 769px) { .api-badge { display: none; } }
     </style>
 </head>
 <body>
@@ -590,10 +682,14 @@
 <!-- LOGIN -->
 <div id="login-screen">
     <div class="login-card">
+        <button type="button" class="theme-toggle-dash login-theme" data-theme-toggle aria-label="Changer de thème">
+            <i class="fas fa-sun icon-sun" aria-hidden="true"></i>
+            <i class="fas fa-moon icon-moon" aria-hidden="true"></i>
+        </button>
         <div class="login-logo">
-            <div class="icon-wrap"><i class="fas fa-shield-halved"></i></div>
-            <h1>Recon IA</h1>
-            <p>Tableau de bord d'administration</p>
+            <img class="login-brand" src="assets/brand/reconia-mark.png" alt="" width="88" height="74">
+            <h1>Recon<span class="brand-ia">IA</span></h1>
+            <p>Espace d'administration</p>
         </div>
         <form id="login-form" autocomplete="off">
             <div class="form-group">
@@ -630,22 +726,32 @@
 
     <header class="dash-header">
         <div class="dash-logo">
-            <i class="fas fa-shield-halved"></i>
-            <span>Recon IA — Dashboard</span>
+            <img class="dash-brand" src="assets/brand/reconia-mark-160.png" alt="" width="30" height="25">
+            <span>Recon<span class="brand-ia">IA</span><span class="dash-sub"> — Administration</span></span>
         </div>
         <div class="dash-actions">
+            <button type="button" class="theme-toggle-dash" data-theme-toggle aria-label="Changer de thème">
+                <i class="fas fa-sun icon-sun" aria-hidden="true"></i>
+                <i class="fas fa-moon icon-moon" aria-hidden="true"></i>
+            </button>
             <span class="api-badge" id="api-url-badge">—</span>
-            <button class="btn-icon" id="btn-refresh"><i class="fas fa-rotate-right"></i> Actualiser</button>
+            <button class="btn-icon" id="btn-refresh" aria-label="Actualiser"><i class="fas fa-rotate-right"></i><span class="btn-label"> Actualiser</span></button>
             <button class="btn-icon" id="btn-autorefresh">
                 <span class="refresh-dot" id="auto-dot" style="display:none"></span>Auto
             </button>
-            <button class="btn-icon" id="btn-logout"><i class="fas fa-right-from-bracket"></i></button>
+            <button class="btn-icon" id="btn-logout" aria-label="Se déconnecter" title="Se déconnecter"><i class="fas fa-right-from-bracket"></i></button>
         </div>
     </header>
 
     <nav class="dash-tabs">
         <button class="dash-tab metier active" data-tab="metier">
             <i class="fas fa-satellite-dish"></i> Reconnaissances &amp; Rapports
+        </button>
+        <button class="dash-tab metier" data-tab="cache">
+            <i class="fas fa-database"></i> Scans bruts (cache)
+        </button>
+        <button class="dash-tab metier" data-tab="graph">
+            <i class="fas fa-diagram-project"></i> Graphe &amp; surveillance
         </button>
         <button class="dash-tab tech" data-tab="tech">
             <i class="fas fa-server"></i> Logs Applicatifs
@@ -743,7 +849,7 @@
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon cyan"><i class="fas fa-toolbox"></i></div>
-                        <div class="stat-info"><div class="stat-value" id="cmp-tools-reliability">—</div><div class="stat-label">Fiabilité des 47 outils OSINT</div></div>
+                        <div class="stat-info"><div class="stat-value" id="cmp-tools-reliability">—</div><div class="stat-label">Fiabilité des outils OSINT</div></div>
                     </div>
                 </div>
                 <div class="charts-grid" style="padding:1rem 1.25rem">
@@ -808,6 +914,168 @@
             </div>
 
         </div><!-- /tab-metier -->
+
+        <!-- ════ TAB SCANS BRUTS (cache pass_recon_cache) ════
+             Résultats BRUTS des scans OSINT, en clair, par domaine : données
+             publiques, sans analyse IA ni donnée du demandeur. Restent
+             consultables ici même quand le dossier est scellé (son rapport
+             n'est lisible qu'avec le code du demandeur) et après expiration
+             du cache (une entrée expirée n'est plus servie au pipeline). -->
+        <div class="tab-panel" id="tab-cache">
+            <div class="logs-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-database"></i> Scans bruts en cache</div>
+                    <div class="logs-filters">
+                        <input type="text" class="filter-input" id="filter-cache-domain" placeholder="Rechercher un domaine…">
+                        <select class="filter-select" id="filter-cache-valid">
+                            <option value="">Toutes</option>
+                            <option value="true">Valides</option>
+                            <option value="false">Expirées</option>
+                        </select>
+                        <button class="btn-icon" id="btn-apply-cache-filters"><i class="fas fa-filter"></i> Filtrer</button>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Domaine</th>
+                                <th>Outils</th>
+                                <th>Sous-domaines</th>
+                                <th>Durée scan</th>
+                                <th>Mis à jour</th>
+                                <th>Expire</th>
+                                <th>État</th>
+                                <th>Réutilisations</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cache-tbody">
+                            <tr><td colspan="10" class="empty-state">Ouvrez cet onglet pour charger les scans.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="logs-footer">
+                    <span id="cache-count">—</span>
+                    <div style="display:flex;gap:0.5rem;align-items:center">
+                        <button class="btn-icon" id="btn-cache-prev" disabled><i class="fas fa-chevron-left"></i></button>
+                        <span id="cache-page-info">—</span>
+                        <button class="btn-icon" id="btn-cache-next" disabled><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div><!-- /tab-cache -->
+
+        <!-- ════ TAB GRAPHE & SURVEILLANCE (phase 7) ════
+             Graphe d'entités techniques publiques (domaine → sous-domaines →
+             IP → ASN → certificat → technologies → CVE), différentiels entre
+             scans, surveillance planifiée opt-in et export des hôtes vivants.
+             Rendu exclusivement par web/dashboard-graph.js (textContent). -->
+        <div class="tab-panel" id="tab-graph">
+            <div class="logs-card g7-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-diagram-project"></i> Graphe d'entités</div>
+                    <div class="logs-filters">
+                        <input type="text" class="filter-input" id="graph-domain" placeholder="Domaine (vide = global)">
+                        <button class="btn-icon" id="btn-graph-load"><i class="fas fa-magnifying-glass"></i> Charger</button>
+                        <button class="btn-icon" id="btn-graph-export-csv" disabled title="Hôtes vivants, CSV (admin)"><i class="fas fa-file-csv"></i> Hôtes vivants CSV</button>
+                        <button class="btn-icon" id="btn-graph-export-json" disabled title="Hôtes vivants, JSON (admin)"><i class="fas fa-file-code"></i> Hôtes vivants JSON</button>
+                    </div>
+                </div>
+                <p class="g7-notice" id="graph-export-notice">
+                    Export des hôtes vivants : issu d'une reconnaissance passive, destiné à une phase active
+                    <strong>autorisée par écrit</strong> et menée hors de ReconIA.
+                </p>
+                <div class="stats-grid g7-pad" id="graph-counters">
+                    <div class="empty-state">Ouvrez cet onglet pour charger le graphe.</div>
+                </div>
+                <div class="g7-toolbar">
+                    <select class="filter-select" id="graph-type-filter">
+                        <option value="">Tous types</option>
+                        <option value="domain">Domaine</option>
+                        <option value="subdomain">Sous-domaine</option>
+                        <option value="ip">IP</option>
+                        <option value="port">Port</option>
+                        <option value="asn">ASN</option>
+                        <option value="organization">Organisation</option>
+                        <option value="certificate">Certificat</option>
+                        <option value="technology">Technologie</option>
+                        <option value="vulnerability">Vulnérabilité (CVE)</option>
+                    </select>
+                    <input type="text" class="filter-input" id="graph-entity-q" placeholder="Filtrer la valeur…">
+                    <button class="btn-icon" id="btn-graph-entities"><i class="fas fa-filter"></i> Filtrer</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Type</th><th>Valeur</th><th>Attributs</th><th>Première observation</th><th>Dernière observation</th></tr>
+                        </thead>
+                        <tbody id="graph-entities-tbody">
+                            <tr><td colspan="5" class="empty-state">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="logs-footer">
+                    <span id="graph-entities-count">—</span>
+                    <div class="g7-pager">
+                        <button class="btn-icon" id="btn-graph-prev" disabled><i class="fas fa-chevron-left"></i></button>
+                        <span id="graph-page-info">—</span>
+                        <button class="btn-icon" id="btn-graph-next" disabled><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="logs-card g7-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-code-compare"></i> Différentiels entre scans</div>
+                    <div class="logs-filters">
+                        <select class="filter-select" id="graph-snap-significant">
+                            <option value="">Tous</option>
+                            <option value="true">Significatifs</option>
+                        </select>
+                        <button class="btn-icon" id="btn-graph-snapshots"><i class="fas fa-rotate-right"></i> Actualiser</button>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>#</th><th>Domaine</th><th>Origine</th><th>Date</th><th>Changements</th><th>Résumé</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="graph-snapshots-tbody">
+                            <tr><td colspan="7" class="empty-state">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="graph-snapshot-detail"></div>
+            </div>
+
+            <div class="logs-card g7-card">
+                <div class="logs-header">
+                    <div class="logs-title"><i class="fas fa-satellite"></i> Surveillance planifiée (opt-in)</div>
+                    <div class="logs-filters">
+                        <input type="text" class="filter-input" id="monitor-domain" placeholder="Domaine à surveiller">
+                        <input type="number" class="filter-input g7-narrow" id="monitor-interval" min="1" max="365" value="7" title="Intervalle (jours)">
+                        <button class="btn-icon" id="btn-monitor-add"><i class="fas fa-plus"></i> Ajouter (désactivé)</button>
+                    </div>
+                </div>
+                <p class="g7-notice" id="monitor-notice">
+                    Rescan passif via le workflow n8n « recon-ia-rescan » (désactivé par défaut). Alerte mail à
+                    l'administrateur uniquement, sur changement significatif. Seuls les domaines ayant déjà fait
+                    l'objet d'un dossier vérifié et consenti peuvent être surveillés.
+                </p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Domaine</th><th>État</th><th>Intervalle</th><th>Dernier rescan</th><th>Dernier changement</th><th>Dernière alerte</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="monitor-tbody">
+                            <tr><td colspan="7" class="empty-state">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div><!-- /tab-graph -->
 
         <!-- ════ TAB TECHNIQUE ════ -->
         <div class="tab-panel" id="tab-tech">
@@ -1038,7 +1306,7 @@
     // affiché sous le badge de statut pendant que status='running', ou pour
     // indiquer à quelle étape un scan a échoué (status='failed').
     const STEP_LABELS = {
-        scanning_osint:          'Scan OSINT (47 outils)',
+        scanning_osint:          'Scan OSINT (56 outils)',
         analyzing_ai:            'Analyse IA',
         // Ollama est une instance unique CPU seul partagée par tout le projet
         // (utils/ollama_lock.py) : un scan peut attendre son tour si une autre
@@ -1079,8 +1347,8 @@
     }
 
     function scoreBarColor(score) {
-        if (score >= 80) return '#00ff88';
-        if (score >= 60) return '#00d4ff';
+        if (score >= 80) return '#10B981';
+        if (score >= 60) return '#00C8F0';
         if (score >= 40) return '#f59e0b';
         return '#f43f5e';
     }
@@ -1115,6 +1383,25 @@
         return r.json();
     }
 
+    async function apiPost(path) {
+        const r = await fetch(_apiBase + path, {
+            method: 'POST',
+            headers: { 'Authorization': 'Basic ' + _authHeader, 'Accept': 'application/json' }
+        });
+        if (r.status === 401) throw new Error('401');
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+        return body;
+    }
+
+    /* ── Coffre des résultats (code d'accès du demandeur) ─────── */
+    const VAULT_STATES = { active: 'Code actif', expired: 'Code expiré', revoked: 'Code révoqué', none: 'Aucun code émis' };
+    function vaultStateLabel(r) {
+        if (r.results_purged_at) return 'Contenu purgé (RGPD)';
+        const label = VAULT_STATES[r.access_state] || r.access_state || '—';
+        return `Chiffré — ${label} · ${r.access_count || 0} consultation(s)`;
+    }
+
     async function apiFetchBinary(path) {
         const r = await fetch(_apiBase + path, {
             headers: { 'Authorization': 'Basic ' + _authHeader }
@@ -1122,6 +1409,27 @@
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.blob();
     }
+
+    // Requête JSON avec corps (POST/PATCH/DELETE) — utilisée par la phase 7.
+    async function apiSend(method, path, body) {
+        const r = await fetch(_apiBase + path, {
+            method,
+            headers: { 'Authorization': 'Basic ' + _authHeader, 'Accept': 'application/json',
+                       'Content-Type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body)
+        });
+        if (r.status === 401) throw new Error('401');
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        return data;
+    }
+
+    // Helpers exposés au module externe web/dashboard-graph.js (phase 7) :
+    // des fonctions liées à la session, jamais l'en-tête d'authentification.
+    window.ReconDash = Object.freeze({
+        apiFetch, apiPost, apiSend, apiFetchBinary, formatDate,
+        onUnauthorized: () => logout(),
+    });
 
     /* ── RECON STATS ────────────────────────────────────────── */
     /**
@@ -1206,7 +1514,7 @@
 
     /**
      * Conformité & Recherche — traçabilité outil→finding, couverture MITRE
-     * ATT&CK, fiabilité des 47 outils OSINT. Lit `compliance` déjà inclus
+     * ATT&CK, fiabilité des outils OSINT. Lit `compliance` déjà inclus
      * dans la réponse de /recon/stats (pas d'appel réseau supplémentaire) —
      * ces trois blocs sont eux-mêmes des agrégats SQL/Python légers côté API
      * (colonnes dénormalisées), jamais un reparsing de rapport complet.
@@ -1255,12 +1563,12 @@
         const statusLabels = Object.keys(byStatus);
         const statusData   = statusLabels.map(k => byStatus[k]);
         const statusColors = {
-            success: '#00ff88', error: '#f43f5e', timeout: '#f59e0b',
+            success: '#10B981', error: '#f43f5e', timeout: '#f59e0b',
             timeout_partial: '#f59e0b', skipped: '#64748b', not_found: '#94a3b8',
-            no_data: '#94a3b8', unavailable: '#94a3b8', limited: '#00d4ff',
+            no_data: '#94a3b8', unavailable: '#94a3b8', limited: '#00C8F0',
         };
-        const bg = statusLabels.map(k => (statusColors[k] || '#00d4ff') + '40');
-        const bd = statusLabels.map(k => statusColors[k] || '#00d4ff');
+        const bg = statusLabels.map(k => (statusColors[k] || '#00C8F0') + '40');
+        const bd = statusLabels.map(k => statusColors[k] || '#00C8F0');
         if (_chartToolsReliability) {
             _chartToolsReliability.data.labels = statusLabels;
             _chartToolsReliability.data.datasets[0].data = statusData;
@@ -1296,11 +1604,11 @@
                 _chartMitre = new Chart(canvas, {
                     type: 'bar',
                     data: { labels: tacticLabels, datasets: [{ label: 'Techniques', data: tacticData,
-                        backgroundColor:'#a855f730', borderColor:'#a855f7', borderWidth:1, borderRadius:4 }]},
+                        backgroundColor:'#1677F230', borderColor:'#1677F2', borderWidth:1, borderRadius:4 }]},
                     options: { indexAxis:'y', responsive:true, maintainAspectRatio:true,
                         plugins:{ legend:{ display:false } },
                         scales: {
-                            x:{ grid:{ color:'rgba(0,212,255,0.06)' }, ticks:{ color:'#94a3b8', font:{size:11}, precision:0 } },
+                            x:{ grid:{ color:'rgba(0,200,240,0.06)' }, ticks:{ color:'#94a3b8', font:{size:11}, precision:0 } },
                             y:{ grid:{ display:false }, ticks:{ color:'#94a3b8', font:{size:11} } }
                         }
                     }
@@ -1340,7 +1648,7 @@
         if (domainFilter) qs += `&domain=${encodeURIComponent(domainFilter)}`;
 
         const tbody = document.getElementById('recon-tbody');
-        tbody.innerHTML = `<tr><td colspan="12" style="padding:2rem;text-align:center;color:#64748b"><span class="loading-spinner"></span> Chargement…</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" style="padding:2rem;text-align:center;color: var(--text-dim)"><span class="loading-spinner"></span> Chargement…</td></tr>`;
 
         try {
             const resp = await apiFetch('/recon' + qs);
@@ -1376,7 +1684,11 @@
                 // or le parseur redécode les entités AVANT que le JS ne soit
                 // évalué — une apostrophe dans le domaine s'échapperait de la
                 // chaîne. On passe par data-* + délégation d'évènement.
-                const pdfBtn   = r.has_pdf
+                // Dossier scellé (coffre des résultats) : le PDF n'est plus
+                // lisible côté serveur, seul le demandeur l'ouvre avec son code.
+                const pdfBtn   = r.results_sealed
+                    ? `<span title="${escHtml(vaultStateLabel(r))}" style="color:var(--cyan)"><i class="fas fa-lock"></i></span>`
+                    : r.has_pdf
                     ? `<button class="btn-action btn-dl" data-action="pdf" data-id="${r.id}" title="Télécharger PDF"><i class="fas fa-file-pdf"></i></button>`
                     : '<span style="color:var(--text-dim)">—</span>';
 
@@ -1460,10 +1772,125 @@
     }
     window.downloadExport = downloadExport;
 
+    /* ── SCANS BRUTS (cache) ────────────────────────────────── */
+    let _cachePage = 1;
+    let _modalCacheId = null;
+
+    async function loadCache(page) {
+        _cachePage = page || 1;
+        const tbody = document.getElementById('cache-tbody');
+        const params = new URLSearchParams({ page: _cachePage, per_page: 20 });
+        const domain = document.getElementById('filter-cache-domain').value.trim();
+        const valid  = document.getElementById('filter-cache-valid').value;
+        if (domain) params.set('domain', domain);
+        if (valid)  params.set('valid', valid);
+        try {
+            const resp = await apiFetch('/cache?' + params.toString());
+            const items = resp.data || [];
+            document.getElementById('cache-count').textContent = `${resp.total} scan(s)`;
+            document.getElementById('cache-page-info').textContent = `${resp.page} / ${Math.max(resp.pages, 1)}`;
+            document.getElementById('btn-cache-prev').disabled = resp.page <= 1;
+            document.getElementById('btn-cache-next').disabled = resp.page >= resp.pages;
+            if (!items.length) {
+                tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fas fa-inbox"></i> Aucun scan en cache</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = items.map(c => {
+                const tools = (c.tools_key || '').split(',').filter(Boolean).length;
+                const state = c.is_valid
+                    ? `<span style="color:var(--green)">valide (${c.remaining_days} j)</span>`
+                    : '<span style="color:var(--text-dim)">expirée</span>';
+                return `<tr>
+                    <td style="color:var(--text-dim)">${c.id}</td>
+                    <td><span class="domain-link" style="color:var(--cyan);font-family:'Fira Code',monospace;cursor:pointer;text-decoration:underline dotted"
+                              data-action="cache-open" data-id="${c.id}">${escHtml(c.domain)}</span></td>
+                    <td>${tools}</td>
+                    <td>${c.subdomain_count ?? '—'}</td>
+                    <td>${fmtDuration(c.scan_duration_s)}</td>
+                    <td>${formatDate(c.updated_at)}</td>
+                    <td>${formatDate(c.expires_at)}</td>
+                    <td>${state}</td>
+                    <td>${c.hit_count}</td>
+                    <td>
+                        <button class="btn-action btn-eye" data-action="cache-open" data-id="${c.id}" title="Voir les données brutes"><i class="fas fa-eye"></i></button>
+                        <button class="btn-action btn-dl" data-action="cache-json" data-id="${c.id}" title="Télécharger le JSON brut"><i class="fas fa-file-code"></i></button>
+                    </td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            if (err.message === '401') { logout(); return; }
+            tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><i class="fas fa-circle-exclamation"></i> Erreur de chargement</td></tr>`;
+        }
+    }
+
+    async function downloadCacheJson(id) {
+        try {
+            const blob = await apiFetchBinary(`/cache/${id}/export.json`);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recon_ia_scan_brut_${id}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert('Erreur téléchargement JSON : ' + err.message);
+        }
+    }
+
+    function setModalFooter(mode) {
+        // mode : 'recon' (exports du dossier), 'sealed' (aucun export lisible),
+        // 'cache' (JSON brut uniquement)
+        document.getElementById('modal-btn-json').style.display = mode === 'sealed' ? 'none' : 'flex';
+        document.getElementById('modal-btn-csv').style.display  = mode === 'recon' ? 'flex' : 'none';
+        if (mode !== 'recon') document.getElementById('modal-btn-dl').style.display = 'none';
+    }
+
+    async function openCacheEntry(id) {
+        _modalReconId = null;
+        _modalCacheId = id;
+        document.getElementById('modal-title').textContent = `Scan brut #${id}`;
+        document.getElementById('modal-subtitle').textContent = 'Chargement…';
+        document.getElementById('modal-body').innerHTML = `<div class="empty-state"><span class="loading-spinner"></span> Chargement…</div>`;
+        setModalFooter('cache');
+        document.getElementById('modal-overlay').classList.add('open');
+        document.body.style.overflow = 'hidden';
+        try {
+            const resp = await apiFetch(`/cache/${id}`);
+            const c = resp.data;
+            const tools = extractTools(c.result);
+            document.getElementById('modal-title').textContent = c.domain;
+            document.getElementById('modal-subtitle').textContent =
+                `Scan brut en cache #${c.id} · mis à jour ${formatDate(c.updated_at)} · ${c.is_valid ? 'valide' : 'expiré'}`;
+            updateMethodologyBanner(tools);
+            document.getElementById('modal-body').innerHTML = `<div class="modal-section">
+                <div class="modal-section-title"><i class="fas fa-database"></i> Cache</div>
+                <div class="modal-grid2">
+                    <div class="info-item"><div class="info-label">Outils</div><div class="info-value">${tools.length}</div></div>
+                    <div class="info-item"><div class="info-label">Sous-domaines</div><div class="info-value">${c.subdomain_count ?? '—'}</div></div>
+                    <div class="info-item"><div class="info-label">Durée du scan</div><div class="info-value">${fmtDuration(c.scan_duration_s)}</div></div>
+                    <div class="info-item"><div class="info-label">Expire</div><div class="info-value">${formatDate(c.expires_at)}</div></div>
+                    <div class="info-item"><div class="info-label">Réutilisations</div><div class="info-value">${c.hit_count}</div></div>
+                    <div class="info-item"><div class="info-label">Créé</div><div class="info-value">${formatDate(c.created_at)}</div></div>
+                </div>
+                ${c.corrupted ? '<p style="color:var(--red)">Résultat stocké illisible (JSON corrompu).</p>' : ''}
+                <p style="color:var(--text-dim);font-size:0.85rem;margin-top:0.75rem">
+                    Données publiques de reconnaissance passive, conservées en clair : aucune analyse IA, aucune donnée du demandeur.
+                </p>
+            </div>` + renderRawTools(tools);
+        } catch (err) {
+            document.getElementById('modal-body').innerHTML =
+                `<div class="empty-state"><i class="fas fa-circle-exclamation"></i> ${escHtml(err.message)}</div>`;
+        }
+    }
+
     /* ── DETAIL MODAL ───────────────────────────────────────── */
     window.openModal = async function openModal(id) {
         _modalReconId = id;
+        _modalCacheId = null;
         _modalDomain  = null;
+        setModalFooter('recon');
         document.getElementById('modal-title').textContent = `Recon #${id}`;
         document.getElementById('modal-subtitle').textContent = 'Chargement…';
         document.getElementById('modal-body').innerHTML = `<div class="empty-state"><span class="loading-spinner"></span> Chargement du rapport…</div>`;
@@ -1502,6 +1929,9 @@
         document.getElementById('modal-subtitle').textContent =
             `#${d.id} · ${reconStatusBadge(d.status).replace(/<[^>]+>/g,'')} · Créé ${formatDate(d.created_at)}`;
         document.getElementById('modal-btn-dl').style.display = d.has_pdf ? 'flex' : 'none';
+        // Dossier scellé : les exports admin répondent 403, on ne les propose pas
+        setModalFooter(d.results_sealed ? 'sealed' : 'recon');
+        if (!d.results_sealed) document.getElementById('modal-btn-dl').style.display = d.has_pdf ? 'flex' : 'none';
 
         let html = '';
 
@@ -1520,13 +1950,44 @@
             </div>
         </div>`;
 
+        /* ── Coffre des résultats ──
+           Une fois scellé, le contenu (scan, analyse, rapport, PDF) n'est
+           lisible qu'avec le code envoyé au demandeur : seules ces
+           métadonnées restent visibles côté admin. */
+        if (d.results_sealed) {
+            const canRevoke = d.access_state === 'active' && !d.results_purged_at;
+            html += `<div class="modal-section">
+                <div class="modal-section-title"><i class="fas fa-lock"></i> Coffre des résultats</div>
+                <div class="modal-grid2">
+                    <div class="info-item"><div class="info-label">État</div>
+                        <div class="info-value">${escHtml(vaultStateLabel(d))}</div></div>
+                    <div class="info-item"><div class="info-label">Code valable jusqu'au</div>
+                        <div class="info-value">${formatDate(d.access_expires_at)}</div></div>
+                    <div class="info-item"><div class="info-label">Dernière consultation</div>
+                        <div class="info-value">${d.last_access_at ? formatDate(d.last_access_at) : 'jamais'}</div></div>
+                    <div class="info-item"><div class="info-label">Scellé le</div>
+                        <div class="info-value">${formatDate(d.sealed_at)}</div></div>
+                </div>
+                <p style="color:var(--text-dim);font-size:0.85rem;margin-top:0.75rem">
+                    Contenu chiffré avec le code d'accès du demandeur : il n'est pas consultable depuis la console.
+                    Le score, les compteurs et les statuts d'outils ci-dessus restent disponibles.
+                </p>
+                <button class="btn-action" id="modal-cache-btn" style="width:auto;padding:0 0.9rem;margin-top:0.5rem"><i class="fas fa-database"></i>&nbsp;Voir le scan brut (cache)</button>
+                ${canRevoke ? `<button class="btn-action" id="modal-revoke-btn" data-id="${d.id}" style="width:auto;padding:0 0.9rem;margin-top:0.5rem"><i class="fas fa-ban"></i>&nbsp;Révoquer le code</button>` : ''}
+            </div>`;
+        }
+
         /* ── Timings ──
            Toutes les durées sont FIGÉES : elles se calculent depuis les
            horodatages persistés (fin - début), jamais depuis Date.now().
            « Total flux » grandissait auparavant à l'infini à chaque rafraîchissement. */
         const scanDur    = timingValue(d);
         const analysisDt = d.analysis_generated_at;
-        const scanEnd    = d.end_report_date || d.completed_at;
+        // Fin du SCAN = completed_at. end_report_date marque la fin de TOUT le
+        // flux (après l'analyse) : le prendre en premier donnait une durée
+        // d'analyse négative (constaté : « −238.5 s » sur un scan servi par le
+        // cache, 2026-10-19). Même correctif que routes/report.py::_compute_timing.
+        const scanEnd    = d.completed_at || d.end_report_date;
         const totalDur   = d.flow_duration_s != null
             ? d.flow_duration_s
             : diffSeconds(d.start_report_date, d.end_report_date);
@@ -1673,8 +2134,9 @@
         /* ── Données brutes par outil ── */
         html += renderRawTools(tools);
 
-        /* ── Aucune analyse ── */
-        if (!analysis && !final) {
+        /* ── Aucune analyse ── (sans objet pour un dossier scellé : le contenu
+           existe, il est seulement chiffré — voir la section Coffre) */
+        if (!analysis && !final && !d.results_sealed) {
             html += `<div class="modal-section">
                 <div style="text-align:center;padding:2rem;color:var(--text-dim)">
                     <i class="fas fa-brain" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:var(--border)"></i>
@@ -1685,6 +2147,43 @@
         }
 
         document.getElementById('modal-body').innerHTML = html;
+
+        // Différentiel avec le scan précédent (phase 7, en clair : lisible
+        // même pour un dossier scellé) — section ajoutée par dashboard-graph.js
+        if (window.ReconGraph) window.ReconGraph.renderReconDiff(d.id, document.getElementById('modal-body'));
+
+        // Dossier scellé : ses données brutes restent consultables via le
+        // cache du même domaine (le plus récent).
+        const cacheBtn = document.getElementById('modal-cache-btn');
+        if (cacheBtn) {
+            cacheBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await apiFetch('/cache?per_page=100&domain=' + encodeURIComponent(d.domain));
+                    const match = (resp.data || []).find(c => c.domain === d.domain);
+                    if (match) openCacheEntry(match.id);
+                    else alert('Aucun scan en cache pour ce domaine.');
+                } catch (err) {
+                    alert('Cache indisponible : ' + err.message);
+                }
+            });
+        }
+
+        const revokeBtn = document.getElementById('modal-revoke-btn');
+        if (revokeBtn) {
+            revokeBtn.addEventListener('click', async () => {
+                if (!confirm('Révoquer le code d\'accès ? Le demandeur ne pourra plus ouvrir son rapport, et le contenu chiffré deviendra définitivement illisible.')) return;
+                revokeBtn.disabled = true;
+                try {
+                    await apiPost(`/recon/${d.id}/revoke_access`);
+                    const resp = await apiFetch(`/recon/${d.id}/report`);
+                    if (resp.success && resp.data) renderModal(resp.data);
+                    loadReports(_currentPage);
+                } catch (err) {
+                    alert('Révocation impossible : ' + err.message);
+                    revokeBtn.disabled = false;
+                }
+            });
+        }
     }
 
     /* ── TRAÇABILITÉ OUTILS (données produites en phase 2) ──── */
@@ -1904,6 +2403,7 @@
         document.getElementById('modal-overlay').classList.remove('open');
         document.body.style.overflow = '';
         _modalReconId = null;
+        _modalCacheId = null;
         _modalDomain  = null;
         // Le bandeau décrit les outils de la recon consultée — on repasse au
         // libellé générique pour ne pas laisser une info hors contexte.
@@ -1916,7 +2416,20 @@
         if (_modalReconId) downloadPdf(_modalReconId, _modalDomain || 'domain');
     });
     document.getElementById('modal-btn-json').addEventListener('click', () => {
-        if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'json');
+        if (_modalCacheId) downloadCacheJson(_modalCacheId);
+        else if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'json');
+    });
+    document.getElementById('btn-apply-cache-filters').addEventListener('click', () => loadCache(1));
+    document.getElementById('filter-cache-domain').addEventListener('keydown', e => { if (e.key === 'Enter') loadCache(1); });
+    document.getElementById('btn-cache-prev').addEventListener('click', () => loadCache(_cachePage - 1));
+    document.getElementById('btn-cache-next').addEventListener('click', () => loadCache(_cachePage + 1));
+    document.getElementById('cache-tbody').addEventListener('click', e => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if (!Number.isInteger(id)) return;
+        if (btn.dataset.action === 'cache-open') openCacheEntry(id);
+        else if (btn.dataset.action === 'cache-json') downloadCacheJson(id);
     });
     document.getElementById('modal-btn-csv').addEventListener('click', () => {
         if (_modalReconId) downloadExport(_modalReconId, _modalDomain || 'domain', 'csv');
@@ -1949,8 +2462,8 @@
                     type: 'doughnut',
                     data: { labels: ['2xx','3xx','4xx','5xx'], datasets: [{
                         data: donutData,
-                        backgroundColor: ['#00ff8840','#00d4ff40','#f59e0b40','#f43f5e40'],
-                        borderColor:     ['#00ff88','#00d4ff','#f59e0b','#f43f5e'],
+                        backgroundColor: ['#10B98140','#00C8F040','#f59e0b40','#f43f5e40'],
+                        borderColor:     ['#10B981','#00C8F0','#f59e0b','#f43f5e'],
                         borderWidth: 2, hoverOffset: 6
                     }]},
                     options: { responsive:true, maintainAspectRatio:true, cutout:'68%',
@@ -1968,11 +2481,11 @@
                 _chartEndpoints = new Chart(document.getElementById('chart-endpoints'), {
                     type: 'bar',
                     data: { labels: epLabels, datasets: [{ label:'Appels', data: epCounts,
-                        backgroundColor:'#00d4ff30', borderColor:'#00d4ff', borderWidth:1, borderRadius:4 }]},
+                        backgroundColor:'#00C8F030', borderColor:'#00C8F0', borderWidth:1, borderRadius:4 }]},
                     options: { indexAxis:'y', responsive:true, maintainAspectRatio:true,
                         plugins:{ legend:{ display:false } },
                         scales: {
-                            x:{ grid:{ color:'rgba(0,212,255,0.06)' }, ticks:{ color:'#94a3b8', font:{size:11} } },
+                            x:{ grid:{ color:'rgba(0,200,240,0.06)' }, ticks:{ color:'#94a3b8', font:{size:11} } },
                             y:{ grid:{ display:false }, ticks:{ color:'#94a3b8', font:{size:11, family:"'Fira Code', monospace"} } }
                         }
                     }
@@ -2003,7 +2516,7 @@
         if (statusClass) qs += `&status_class=${encodeURIComponent(statusClass)}`;
 
         const tbody = document.getElementById('logs-tbody');
-        tbody.innerHTML = `<tr><td colspan="7" style="padding:2rem;text-align:center;color:#64748b"><span class="loading-spinner"></span> Chargement…</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="padding:2rem;text-align:center;color: var(--text-dim)"><span class="loading-spinner"></span> Chargement…</td></tr>`;
 
         try {
             const resp = await apiFetch('/logs' + qs);
@@ -2040,7 +2553,7 @@
     /* ── REFRESH ────────────────────────────────────────────── */
     async function refreshAll() {
         const btn = document.getElementById('btn-refresh');
-        btn.innerHTML = '<span class="loading-spinner"></span> Chargement…';
+        btn.innerHTML = '<span class="loading-spinner"></span><span class="btn-label"> Chargement…</span>';
         btn.disabled = true;
         try {
             await Promise.all([
@@ -2048,7 +2561,7 @@
                 loadStats(), loadLogs(_currentPage)
             ]);
         } finally {
-            btn.innerHTML = '<i class="fas fa-rotate-right"></i> Actualiser';
+            btn.innerHTML = '<i class="fas fa-rotate-right"></i><span class="btn-label"> Actualiser</span>';
             btn.disabled = false;
         }
     }
@@ -2117,6 +2630,7 @@
         if (_chartEndpoints) { _chartEndpoints.destroy(); _chartEndpoints = null; }
         if (_chartToolsReliability) { _chartToolsReliability.destroy(); _chartToolsReliability = null; }
         if (_chartMitre)            { _chartMitre.destroy();            _chartMitre = null; }
+        if (window.ReconGraph) window.ReconGraph.reset();
         document.getElementById('dashboard').style.display   = 'none';
         document.getElementById('login-screen').style.display = 'flex';
         document.getElementById('login-form').reset();
@@ -2130,6 +2644,8 @@
             document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById('tab-' + target).classList.add('active');
+            if (target === 'cache') loadCache(_cachePage);
+            if (target === 'graph' && window.ReconGraph) window.ReconGraph.open();
             if (target === 'tech') {
                 if (_chartStatus)    _chartStatus.resize();
                 if (_chartEndpoints) _chartEndpoints.resize();
@@ -2173,5 +2689,6 @@
 
 })();
 </script>
+<script src="dashboard-graph.js"></script>
 </body>
 </html>

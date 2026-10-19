@@ -1,0 +1,21 @@
+{
+  "id": "hsts",
+  "titre": "HSTS — HTTPS obligatoire côté navigateur",
+  "categorie": "Web",
+  "outils": ["security_headers", "http_observatory", "redirect_chain"],
+  "pourquoi": "L'en-tête Strict-Transport-Security indique au navigateur de ne plus jamais contacter le site en HTTP clair pendant la durée max-age. Même si l'utilisateur tape l'adresse sans https ou suit un vieux lien, le navigateur passe directement en HTTPS. Avec includeSubDomains et l'inscription dans la liste « preload » des navigateurs, la protection s'applique dès la toute première visite.",
+  "risque": "Sans HSTS, la première requête (ou toute requête vers un lien http://) peut être interceptée sur un réseau hostile (Wi-Fi public, routeur compromis) : l'attaquant maintient la victime en HTTP (attaque « SSL stripping ») et lit ou modifie le trafic, y compris les identifiants et cookies de session.",
+  "comment_corriger": [
+    "S'assurer que le site et tous ses sous-domaines fonctionnent en HTTPS avec un certificat valide.",
+    "Rediriger systématiquement HTTP vers HTTPS (redirection 301).",
+    "Ajouter l'en-tête Strict-Transport-Security avec un max-age court pour tester, puis au moins un an (31536000).",
+    "Ajouter includeSubDomains, puis preload et inscrire le domaine sur hstspreload.org une fois la configuration stabilisée."
+  ],
+  "exemple": "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
+  "references": [
+    {"titre": "RFC 6797 — HTTP Strict Transport Security", "url": "https://www.rfc-editor.org/rfc/rfc6797"},
+    {"titre": "OWASP — HTTP Strict Transport Security Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html"},
+    {"titre": "CWE-319 — Cleartext Transmission of Sensitive Information", "url": "https://cwe.mitre.org/data/definitions/319.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

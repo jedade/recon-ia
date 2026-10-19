@@ -1,0 +1,19 @@
+# Fins de ligne LF imposées pour tout ce qui est exécuté par un shell ou dans
+# un conteneur Linux, quel que soit `core.autocrlf` du poste.
+#
+# Constaté le 2026-10-19 sur un poste Windows (core.autocrlf=true) : le
+# checkout convertissait api/entrypoint.sh en CRLF ; `api/` étant monté tel
+# quel dans le conteneur, l'API ne démarrait plus du tout
+# (« entrypoint.sh: set: Illegal option - »).
+* text=auto
+*.sh        text eol=lf
+*.py        text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.template  text eol=lf
+Dockerfile*  text eol=lf
+Caddyfile   text eol=lf
+.env.example text eol=lf

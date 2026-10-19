@@ -23,7 +23,9 @@ if not database_url:
     dbname   = os.getenv('POSTGRES_DB')
     database_url = f"postgresql://{user}:{password}@postgres:5432/{dbname}"
 
-engine = create_engine(database_url)
+from db_url import with_psycopg2  # noqa: E402  (pilote explicite, voir db_url.py)
+
+engine = create_engine(with_psycopg2(database_url))
 
 # ---------------------------------------------------------------------------
 # Migrations déclarées
@@ -57,6 +59,9 @@ MIGRATIONS = [
 
     ("recon", "otp_sent_at",
      "ALTER TABLE recon ADD COLUMN IF NOT EXISTS otp_sent_at TIMESTAMP"),
+
+    ("recon", "otp_attempts",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS otp_attempts INTEGER NOT NULL DEFAULT 0"),
 
     ("recon", "start_report_date",
      "ALTER TABLE recon ADD COLUMN IF NOT EXISTS start_report_date TIMESTAMP"),
@@ -159,6 +164,44 @@ MIGRATIONS = [
       WHERE analysis_result IS NOT NULL
         AND tokens_total IS NULL
      """),
+
+    # ── Coffre des résultats : code d'accès + chiffrement (2026-10-19) ───────
+    # Voir utils/result_vault.py. `access_token_hash` est UNIQUE : deux
+    # dossiers ne peuvent pas partager une empreinte (collision HMAC de
+    # 256 bits = impossible en pratique, la contrainte rend l'invariant
+    # explicite et sert d'index de recherche).
+    ("recon", "sealed_bundle",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS sealed_bundle BYTEA"),
+
+    ("recon", "sealed_pdf",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS sealed_pdf BYTEA"),
+
+    ("recon", "sealed_at",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS sealed_at TIMESTAMP"),
+
+    ("recon", "access_salt",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS access_salt VARCHAR(32)"),
+
+    ("recon", "access_token_hash",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS access_token_hash VARCHAR(64)"),
+
+    ("recon", "ix_recon_access_token_hash",
+     "CREATE UNIQUE INDEX IF NOT EXISTS ix_recon_access_token_hash ON recon (access_token_hash)"),
+
+    ("recon", "access_expires_at",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS access_expires_at TIMESTAMP"),
+
+    ("recon", "access_revoked_at",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS access_revoked_at TIMESTAMP"),
+
+    ("recon", "access_count",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS access_count INTEGER NOT NULL DEFAULT 0"),
+
+    ("recon", "last_access_at",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS last_access_at TIMESTAMP"),
+
+    ("recon", "results_purged_at",
+     "ALTER TABLE recon ADD COLUMN IF NOT EXISTS results_purged_at TIMESTAMP"),
 
     # ── Métriques de conformité dénormalisées (dashboard recherche/présentation) ──
     # Même logique que security_score/security_grade ci-dessus : extraites une
@@ -314,6 +357,105 @@ MIGRATIONS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Phase 7 (2026-10-19) — voir models/entity_graph.py et models/scan_monitoring.py
+# ---------------------------------------------------------------------------
+# Liste séparée, ajoutée à MIGRATIONS ci-dessous, pour pouvoir être rejouée
+# seule par les tests (SQL portable PostgreSQL/SQLite, tests/test_phase7_integration.py).
+# Uniquement des CREATE ... IF NOT EXISTS : rejouables à chaque démarrage.
+# Les clés étrangères vers recon sont en ON DELETE SET NULL : la purge RGPD
+# (utils/retention.py, suppression des demandes jamais vérifiées) ne casse
+# ni le graphe ni l'historique des différentiels, qui ne contiennent aucune
+# donnée personnelle. Aucune colonne n'est ajoutée à `recon`.
+PHASE7_MIGRATIONS = [
+    ("entity", "(table)",
+     """
+     CREATE TABLE IF NOT EXISTS entity (
+         id          SERIAL PRIMARY KEY,
+         type        VARCHAR(20)  NOT NULL,
+         value       VARCHAR(512) NOT NULL,
+         attributes  TEXT,
+         first_seen  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         last_seen   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         CONSTRAINT uq_entity_type_value UNIQUE (type, value)
+     )
+     """),
+
+    ("entity", "ix_entity_type",
+     "CREATE INDEX IF NOT EXISTS ix_entity_type ON entity (type)"),
+
+    ("entity", "ix_entity_last_seen",
+     "CREATE INDEX IF NOT EXISTS ix_entity_last_seen ON entity (last_seen)"),
+
+    ("relation", "(table)",
+     """
+     CREATE TABLE IF NOT EXISTS relation (
+         id           SERIAL PRIMARY KEY,
+         source_id    INTEGER      NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
+         target_id    INTEGER      NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
+         type         VARCHAR(32)  NOT NULL,
+         tool         VARCHAR(64),
+         root_domain  VARCHAR(255) NOT NULL,
+         recon_id     INTEGER      REFERENCES recon(id) ON DELETE SET NULL,
+         scan_ref     VARCHAR(128),
+         first_seen   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         last_seen    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         CONSTRAINT uq_relation_edge UNIQUE (source_id, target_id, type, root_domain)
+     )
+     """),
+
+    ("relation", "ix_relation_root_domain",
+     "CREATE INDEX IF NOT EXISTS ix_relation_root_domain ON relation (root_domain)"),
+
+    ("relation", "ix_relation_source",
+     "CREATE INDEX IF NOT EXISTS ix_relation_source ON relation (source_id)"),
+
+    ("relation", "ix_relation_target",
+     "CREATE INDEX IF NOT EXISTS ix_relation_target ON relation (target_id)"),
+
+    ("scan_snapshot", "(table)",
+     """
+     CREATE TABLE IF NOT EXISTS scan_snapshot (
+         id                    SERIAL PRIMARY KEY,
+         domain                VARCHAR(255) NOT NULL,
+         recon_id              INTEGER      UNIQUE REFERENCES recon(id) ON DELETE SET NULL,
+         cache_id              INTEGER,
+         scan_ref              VARCHAR(128) NOT NULL,
+         source                VARCHAR(16)  NOT NULL DEFAULT 'pipeline',
+         snapshot_json         TEXT         NOT NULL,
+         diff_json             TEXT,
+         previous_snapshot_id  INTEGER,
+         significant           BOOLEAN      NOT NULL DEFAULT FALSE,
+         change_count          INTEGER      NOT NULL DEFAULT 0,
+         created_at            TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+     )
+     """),
+
+    ("scan_snapshot", "ix_scan_snapshot_domain_created",
+     "CREATE INDEX IF NOT EXISTS ix_scan_snapshot_domain_created ON scan_snapshot (domain, created_at)"),
+
+    ("scan_snapshot", "ix_scan_snapshot_scan_ref",
+     "CREATE INDEX IF NOT EXISTS ix_scan_snapshot_scan_ref ON scan_snapshot (scan_ref)"),
+
+    ("watched_domain", "(table)",
+     """
+     CREATE TABLE IF NOT EXISTS watched_domain (
+         id                SERIAL PRIMARY KEY,
+         domain            VARCHAR(255) NOT NULL UNIQUE,
+         enabled           BOOLEAN      NOT NULL DEFAULT FALSE,
+         interval_days     INTEGER      NOT NULL DEFAULT 7,
+         last_rescan_at    TIMESTAMP,
+         last_snapshot_id  INTEGER,
+         last_change_at    TIMESTAMP,
+         last_alert_at     TIMESTAMP,
+         created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+     )
+     """),
+]
+
+MIGRATIONS += PHASE7_MIGRATIONS
+
+# ---------------------------------------------------------------------------
 # Exécution
 # ---------------------------------------------------------------------------
 
@@ -334,6 +476,72 @@ def run():
 
     print(f"\n{'='*50}")
     print(f"Migration terminée : {ok} succès, {errors} erreur(s)")
+    if errors:
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Rôles à droits minimaux (2026-10-19, plan d'action phase 1)
+# ---------------------------------------------------------------------------
+# Les migrations tournent avec le compte propriétaire ; à l'exécution, l'API
+# et n8n utilisent chacun un rôle limité, créé ou resynchronisé ici à chaque
+# démarrage (idempotent) quand son mot de passe est fourni :
+#
+#   recon_app  (API, APP_DB_PASSWORD) : lecture/écriture sur recon, audit_log,
+#              pass_recon_cache et les tables de la phase 7 (entity, relation,
+#              scan_snapshot, watched_domain) ; lecture seule sur
+#              rag_documents ; aucun DDL.
+#   rag_writer (n8n, RAG_DB_PASSWORD) : rag_documents UNIQUEMENT (le nœud
+#              « Postgres PGVector Store » y écrit, le workflow la vide par
+#              TRUNCATE). USAGE + CREATE sur le schéma : le nœud exécute
+#              `CREATE TABLE IF NOT EXISTS`, refusé sans CREATE même quand la
+#              table existe déjà (vérifié sur la vraie base). Aucun accès à
+#              recon/audit_log/pass_recon_cache : une compromission de n8n ne
+#              donne plus accès aux dossiers des demandeurs.
+#
+# psycopg2 interpole les paramètres côté client, d'où la possibilité de passer
+# le mot de passe en paramètre à ALTER ROLE (instruction qui n'accepte pas de
+# paramètre côté serveur). Les noms de rôles sont des constantes.
+ROLE_GRANTS = {
+    'recon_app': ('APP_DB_PASSWORD', [
+        "GRANT USAGE ON SCHEMA public TO recon_app",
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON recon, audit_log, pass_recon_cache TO recon_app",
+        # Phase 7 : graphe d'entités, différentiel, surveillance
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON entity, relation, scan_snapshot, watched_domain TO recon_app",
+        "GRANT SELECT ON rag_documents TO recon_app",
+        "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO recon_app",
+    ]),
+    'rag_writer': ('RAG_DB_PASSWORD', [
+        "GRANT USAGE, CREATE ON SCHEMA public TO rag_writer",
+        "GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON rag_documents TO rag_writer",
+        "GRANT USAGE, SELECT ON SEQUENCE rag_documents_id_seq TO rag_writer",
+    ]),
+}
+
+
+def ensure_roles():
+    errors = 0
+    with engine.connect() as conn:
+        for role, (env_var, grants) in ROLE_GRANTS.items():
+            password = os.getenv(env_var, '')
+            if not password:
+                print(f"  -  rôle {role} non configuré ({env_var} absent) — compte propriétaire utilisé")
+                continue
+            try:
+                exists = conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {'r': role}).scalar()
+                verb = 'ALTER' if exists else 'CREATE'
+                conn.execute(text(f"{verb} ROLE {role} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                                  f"PASSWORD :pw"), {'pw': password})
+                conn.execute(text(f"DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO {role}', "
+                                  f"current_database()); END $$"))
+                for grant in grants:
+                    conn.execute(text(grant))
+                conn.commit()
+                print(f"  ✓  rôle {role} ({'mis à jour' if exists else 'créé'})")
+            except Exception as e:
+                conn.rollback()
+                print(f"  ✗  rôle {role} — {e}")
+                errors += 1
     if errors:
         sys.exit(1)
 
@@ -417,3 +625,5 @@ if __name__ == '__main__':
     print("=== Migration recon-ia ===\n")
     run()
     backfill_compliance_metrics()
+    print("\n=== Rôles à droits minimaux ===")
+    ensure_roles()  # après les migrations : les GRANT visent des tables existantes

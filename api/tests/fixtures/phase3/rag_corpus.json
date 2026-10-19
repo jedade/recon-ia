@@ -1,0 +1,21 @@
+{
+  "_comment": "Mini-corpus hors ligne (collections du plan : normes, attack, menaces, explications) pour tools/measure_phase3.py et les tests — recherche lexicale simulée, pas pgvector.",
+  "documents": [
+    {"collection": "normes", "source": "RFC 7489", "content": "DMARC policy record _dmarc p=none p=quarantine p=reject email spoofing domain owner policy reporting rua."},
+    {"collection": "normes", "source": "RFC 7208", "content": "SPF sender policy framework all qualifier -all ~all softfail +all neutral include lookup limit 10."},
+    {"collection": "normes", "source": "OWASP HTTP Headers Cheat Sheet", "content": "HTTP security headers Strict-Transport-Security HSTS Content-Security-Policy CSP X-Frame-Options nosniff Referrer-Policy."},
+    {"collection": "normes", "source": "RFC 8996", "content": "Deprecating TLS 1.0 and TLS 1.1 protocols transport layer security weak protocols."},
+    {"collection": "normes", "source": "ANSSI TLS", "content": "Recommandations TLS certificat expiration renouvellement ACME suites de chiffrement."},
+    {"collection": "normes", "source": "RFC 4033", "content": "DNSSEC zone signing DNS spoofing cache poisoning DS record DNSKEY."},
+    {"collection": "attack", "source": "MITRE ATT&CK T1566", "content": "Phishing spoofing email DMARC SPF missing policy attacker sends email domain."},
+    {"collection": "attack", "source": "MITRE ATT&CK T1190", "content": "Exploit Public-Facing Application known exploited vulnerability patch CVE exploit internet service."},
+    {"collection": "attack", "source": "MITRE ATT&CK T1584.001", "content": "Compromise Infrastructure Domains subdomain takeover dangling CNAME cloud service."},
+    {"collection": "attack", "source": "MITRE ATT&CK T1133", "content": "External Remote Services database port exposed internet RDP VNC SMB MySQL Redis."},
+    {"collection": "attack", "source": "MITRE ATT&CK T1557", "content": "Adversary-in-the-Middle HSTS SSL stripping TLS downgrade weak protocols headers."},
+    {"collection": "menaces", "source": "CISA KEV", "content": "Known exploited vulnerability catalog patch priority exploit ransomware public-facing application."},
+    {"collection": "menaces", "source": "Subdomain takeover guide", "content": "Subdomain takeover dangling CNAME Heroku GitHub Pages cloud service unclaimed resource."},
+    {"collection": "menaces", "source": "Database exposure report", "content": "Database port exposed internet MySQL Redis MongoDB Elasticsearch firewall ransom."},
+    {"collection": "explications", "source": "Explication DMARC", "content": "Pourquoi DMARC : sans politique DMARC un attaquant peut usurper le domaine email spoofing phishing."},
+    {"collection": "explications", "source": "Explication HSTS", "content": "Pourquoi HSTS : sans HSTS un attaquant réseau peut forcer HTTP SSL stripping header missing."}
+  ]
+}

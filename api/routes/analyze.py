@@ -15,7 +15,7 @@ Analyse OSINT IA — exécution séquentielle optimisée selon les quotas :
   GEMINI (slot 1) — contexte 1M tokens, 1500 req/jour gratuit
     → Moteur principal si GEMINI_API_KEY configuré
     → max_rounds complets, rotation automatique sur quota épuisé
-    → Modèles : gemini-2.5-pro, gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash
+    → Modèles : lus sur l’API au démarrage (alias gemini-flash-latest par défaut)
 
   CEREBRAS (slot 2) — débit TPM très élevé, modèles llama-3.3-70b
     → Activé si DeepSeek/Gemini absents ou échoués
@@ -63,7 +63,7 @@ from flasgger import swag_from
 from database import db
 from extensions import limiter
 from models.recon import Recon
-from utils.auth import require_auth
+from utils.auth import require_auth, require_service_or_auth
 from utils.web_search import search_web
 from utils.analysis_merger import merge_analyses, compute_security_score
 from utils.mitre_attack import map_tools_to_techniques
@@ -72,6 +72,8 @@ from utils.grounding_check import compute_grounding_check
 from utils.coverage_check import compute_coverage_check
 from utils.rag_retrieval import retrieve_relevant_docs
 from utils.email_sender import send_error_notification
+from utils.signals_extra import extract_extra_signals
+from utils.scan_stats import comparative_context, tld_of
 
 _CACHE_TTL_H        = int(os.getenv("ANALYSIS_CACHE_TTL_HOURS", "168"))   # 7 jours
 _GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "")
@@ -134,14 +136,16 @@ _OUTPUT_SCHEMA = {
         {
             "id":             "string — ex: DNS-001, WEB-002, EMAIL-003",
             "category":       "DNS | SSL | Email | Web | Infrastructure | Subdomain | Reputation | Cloud",
-            "severity":       "CRITICAL | HIGH | MEDIUM | LOW | INFO",
+            "severity":       "CRITICAL | HIGH | MEDIUM | LOW | INFO — PROPOSITION : le serveur la recalcule par règle déterministe ; un constat positif est toujours INFO",
+            "confidence":     "high | medium | low — ta confiance que le constat est exact au vu des données (low si déduit ou incertain)",
+            "observed_at":    "string ISO 8601 UTC — reprendre `scan_date` des données (horodatage du scan)",
             "title":          "string — titre court et précis",
             "description":    "string — explication détaillée du problème",
             "evidence":       "string — données OSINT exactes qui prouvent le problème",
             "source_tool":    "string — OBLIGATOIRE : clé de l'outil OSINT d'où provient la preuve (ex: dns_records, ssl_info, shodan_internetdb). Doit figurer dans tools_executed.",
             "source_tools":   ["string — liste des clés d'outils sources si la preuve croise plusieurs outils (source_tool = le principal)"],
             "recommendation": "string — action corrective concrète et implémentable",
-            "references":     ["string — CVE-XXXX, CWE-XXX, OWASP A0X:2021, RFC XXXX"],
+            "references":     ["string — CWE-XXX, OWASP A0X:2021, RFC XXXX, T1566 ; une CVE UNIQUEMENT si elle figure dans shodan_internetdb.vulns"],
             "web_sources":    ["string — URL des sources web consultées"],
         }
     ],
@@ -159,6 +163,13 @@ _OUTPUT_SCHEMA = {
     },
     "strengths": [
         "string — bonnes pratiques déjà en place (SPF strict, HSTS activé...)"
+    ],
+    "tool_reviews": [
+        {
+            "tool":    "string — clé d'un outil de tools_executed (status success)",
+            "verdict": "ras | constat | info — ras = rien à signaler, constat = a donné un finding, info = information utile sans risque",
+            "note":    "string — une phrase : ce que montre la donnée de cet outil (≤ 160 caractères)",
+        }
     ],
     "immediate_actions": [
         {
@@ -207,6 +218,29 @@ Chaque finding DOIT être attribuable à l'outil OSINT qui a produit la donnée 
   le couple (source_tool, evidence) soit vérifiable et reproductible.
 • `web_sources` ne remplace pas `source_tool` : les sources web servent à qualifier
   le risque, l'outil OSINT sert à prouver le fait observé sur la cible.
+• CVE : ne cite une CVE (titre, evidence, recommandation, références) QUE si elle
+  figure dans `network.shodan_internetdb.vulns` — toute autre CVE est retirée
+  automatiquement, et le finding avec elle s'il ne repose que sur elle.
+  `kev_cves` liste celles du catalogue CISA KEV (exploitées activement).
+• Sévérité : `severity` est une proposition. Le serveur la recalcule par une table
+  de règles appliquée aux données brutes (`deterministic_findings` liste les
+  constats déjà établis et leur sévérité imposée). Un constat POSITIF (bonne
+  pratique en place) va dans `strengths`, jamais dans `findings` — et ne peut
+  en aucun cas être HIGH ou CRITICAL.
+• `confidence` : high (donnée directe et sans ambiguïté), medium (déduction
+  raisonnable), low (indice faible) — le serveur peut l'abaisser, jamais l'élever.
+• `passive_extra` résume les outils de collecte enrichie (dns_mass, blocklists,
+  threats_check, web_metadata, site_ranking, virustotal, dnsdumpster,
+  grayhatwarfare, github_dorks) : leurs clés sont des `source_tool` valides.
+• `agent_pivots` : pivots passifs complémentaires choisis par l'agent ; un
+  finding qui s'appuie dessus cite `agent_pivots` comme `source_tool`.
+• `tool_reviews` : OBLIGATOIRE — une entrée pour CHAQUE outil de `tools_executed`
+  dont le statut est success, même s'il n'a rien révélé (verdict « ras »). C'est
+  la preuve que toutes les données collectées ont été examinées ; un outil absent
+  de tool_reviews est compté comme NON examiné dans la couverture du rapport.
+• `comparative_context` : statistiques anonymes des scans passés, pour SITUER le
+  domaine (« comme 65 % des domaines .bj… »). Ce n'est JAMAIS la preuve d'un
+  finding ni une `evidence`.
 
 """
 
@@ -624,12 +658,60 @@ def _extract_signals(recon: dict) -> dict:
         "rdap": _g(d, "rdap_info", "data"),
     }
 
+    # Phase 5 : signaux compacts des outils de collecte enrichie (dns_mass,
+    # blocklists, threats_check, web_metadata, site_ranking, virustotal…).
+    try:
+        signals["passive_extra"] = extract_extra_signals(d)
+    except Exception as e:
+        logger.warning("[analyze] signaux phase 5 ignorés : %s", e)
+
+    # Phase 8 : pivots exécutés par la boucle agent — seulement les résumés
+    # déjà nettoyés et bornés par utils/recon_agent.py, jamais raw_output.
+    pivots = _g(d, "agent_pivots", "data", "decisions")
+    if isinstance(pivots, list):
+        executed = [
+            {"tool": x.get("tool"), "target": (x.get("arguments") or {}).get("target")
+             or next((v for k, v in (x.get("arguments") or {}).items() if k != "reason"), None),
+             "result": x.get("result_summary")}
+            for x in pivots
+            if isinstance(x, dict) and x.get("outcome") == "executed"
+        ][:15]
+        if executed:
+            signals["agent_pivots"] = executed
+
+    # Phase 6 : statistiques agrégées et anonymisées des scans passés —
+    # contexte comparatif seulement, jamais la preuve d'un finding.
+    try:
+        context = comparative_context(tld_of(signals["domain"]), signals)
+        if context:
+            signals["comparative_context"] = context
+    except Exception as e:
+        logger.warning("[analyze] contexte comparatif ignoré : %s", e)
+
     return {k: v for k, v in signals.items() if v is not None}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Handler des tool calls (partagé par les deux backends)
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _any_backend_available() -> bool:
+    """
+    Vrai si au moins un backend d'analyse peut servir : une clé cloud, OU le
+    repli local Ollama joignable avec son modèle installé.
+
+    Avant (constaté au premier déploiement réel, 2026-10-19) : seules les clés
+    cloud comptaient. Sans clé, /analyze et /analyze/async répondaient 503
+    avant même d'essayer Ollama — alors que setup.sh et le README promettent
+    que « sans aucune clé, la cascade retombe automatiquement sur Ollama
+    local ». Le pipeline n8n s'arrêtait donc après le scan OSINT.
+    """
+    if _DEEPSEEK_ENABLED or _GEMINI_API_KEY or _CEREBRAS_API_KEY or _GROQ_API_KEY or _OPENROUTER_API_KEY:
+        return True
+    from utils.ollama_client import OllamaClient
+    client = OllamaClient()
+    return client.is_available() and client.model_loaded()
+
 
 def _tool_handler(tool_name: str, tool_args: dict) -> str:
     if tool_name == "web_search":
@@ -763,11 +845,12 @@ def _build_messages(system_prompt: str, domain: str, signals: dict, search_hints
                 f"déterministiquement aux outils exécutés (ne pas en inventer d'autres) — "
                 f"référence-les explicitement dans `recommendation` des findings concernés "
                 f"(ex: \"cf. T1596.001\") pour ancrer la recommandation dans un cadre reconnu\n"
-                f"7. Le champ `rag_context` contient des extraits du corpus OWASP Cheat Sheets / "
-                f"ASVS / WSTG sélectionnés pour ce scan (recherche par similarité) — base tes "
-                f"`recommendation` dessus en priorité quand un extrait s'applique, et cite la "
-                f"source (ex: \"cf. OWASP ASVS\") plutôt que de reformuler une bonne pratique "
-                f"générique de mémoire\n"
+                f"7. Le champ `rag_context` contient des extraits du corpus (normes RFC/OWASP/ANSSI, "
+                f"MITRE ATT&CK, menaces, explications) sélectionnés PAR CONSTAT : chaque extrait "
+                f"porte `topic` (le constat de `deterministic_findings` qu'il documente) et "
+                f"`collection` — base la `recommendation` du finding correspondant dessus en "
+                f"priorité, et cite la source (ex: \"cf. RFC 7489\") plutôt que de reformuler une "
+                f"bonne pratique générique de mémoire\n"
                 f"8. Une fois toutes tes recherches terminées, produis le rapport JSON final\n\n"
                 f"Commence par tes recherches web, puis fournis le rapport JSON."
             ),
@@ -965,11 +1048,252 @@ def _run_backend(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Phase 3 — préparation déterministe (avant LLM) et post-traitement (après)
+# ══════════════════════════════════════════════════════════════════════════════
+# Partagés par analyze() (sync) et _run_bg_analysis() (async) : avant cette
+# factorisation, chaque étape était dupliquée dans les deux chemins, et un
+# oubli d'un côté (ex. `source_tool` côté Ollama, voir CLAUDE.md) suffisait à
+# faire diverger les rapports selon le point d'entrée.
+
+# Champs de premier niveau acceptés depuis la sortie du LLM — tout autre champ
+# (ex. un `security_score`, `grounding_check` ou `severity_check` « offert » par
+# le modèle) est ignoré : ces champs sont calculés par le serveur.
+_LLM_REPORT_KEYS = {
+    "domain", "risk_score", "risk_level", "executive_summary", "findings", "strengths", "tool_reviews",
+    "immediate_actions", "searches_performed", "model_used", "analyzed_at",
+    "tokens_used", "_partial", "_resumed", "_reduce_degraded",
+}
+
+
+def _scan_data(recon_json: dict) -> dict:
+    """Résultats bruts des outils, que `recon_json` soit enveloppé (`data`) ou non."""
+    if not isinstance(recon_json, dict):
+        return {}
+    d = recon_json.get("data")
+    return d if isinstance(d, dict) else recon_json
+
+
+def _prepare_phase3(recon_json: dict, signals: dict, fallback_query: str,
+                    kev_override: Optional[Dict] = None, retriever=None) -> Dict[str, Any]:
+    """
+    Avant l'appel au LLM : constats déterministes, KEV, contexte RAG par
+    constat (B7). Ajoute à `signals` : `deterministic_findings`, `kev_cves`
+    (dans shodan_internetdb) et `rag_context`. Ne lève jamais.
+
+    `kev_override` / `retriever` : injection pour les tests et la mesure hors
+    ligne (tools/measure_phase3.py) — en production, KEV vient de utils/kev.py
+    et le RAG de pgvector.
+    """
+    from utils import kev as kev_mod
+    from utils.finding_sanitizer import to_iso_utc
+    from utils.rag_retrieval import TopicRetriever, build_rag_context
+    from utils.severity_rules import RULES, detect_observations, observed_cves, rag_topics
+
+    scan = _scan_data(recon_json)
+    cves = observed_cves(scan)
+    if kev_override is not None:
+        kev = {c: kev_override[c] for c in cves if c in kev_override}
+    else:
+        kev = kev_mod.kev_entries(cves.keys()) if cves else {}
+    observations = detect_observations(scan, kev)
+    observed_at = to_iso_utc(signals.get("scan_date")) or to_iso_utc(datetime.utcnow())
+
+    shodan = (signals.get("network") or {}).get("shodan_internetdb")
+    if isinstance(shodan, dict):
+        shodan["kev_cves"] = sorted(kev)
+
+    signals["deterministic_findings"] = [
+        {
+            "rule":        rid,
+            "category":    RULES[rid]["category"],
+            "title":       RULES[rid]["title"],
+            "severity":    o.get("severity") or RULES[rid]["severity"],
+            "source_tool": o.get("source_tool"),
+            "evidence":    str(o.get("evidence") or "")[:200],
+        }
+        for rid, o in observations.items()
+        if not rid.startswith("_") and o.get("state") == "observed"
+    ][:30]
+
+    retriever = retriever or TopicRetriever()
+    topics = rag_topics(observations)
+    if not topics and fallback_query:
+        topics = [{"id": "general", "query": fallback_query, "category": "Web"}]
+    try:
+        rag_context, rag_stats = build_rag_context(topics, retriever)
+    except Exception as e:   # filet : le RAG ne doit jamais bloquer l'analyse
+        logger.warning("[rag] Contexte RAG indisponible (%s)", e)
+        rag_context, rag_stats = [], {"queries": 0, "filtered_by_collection": None}
+    signals["rag_context"] = rag_context
+
+    return {
+        "scan": scan, "cves": cves, "kev": kev, "observations": observations,
+        "observed_at": observed_at, "retriever": retriever, "rag_stats": rag_stats,
+        "kev_status": kev_mod.status(),
+    }
+
+
+def _annotate_attack(findings: List[Dict], signals: dict) -> List[Dict]:
+    """
+    Point d'accroche phase 4 : `utils/attack_enablement.annotate_findings`
+    ajoute `attack_enabled` / `mitigations`. Import protégé — no-op tant que
+    le module n'existe pas, et une erreur du module ne casse pas l'analyse.
+    """
+    try:
+        from utils.attack_enablement import annotate_findings
+    except ImportError:
+        return findings
+    try:
+        result = annotate_findings(findings, signals)
+    except Exception:
+        logger.exception("[attack_enablement] annotation échouée — findings conservés tels quels")
+        return findings
+    return result if isinstance(result, list) else findings
+
+
+_REVIEW_VERDICTS = {"ras", "constat", "info"}
+
+
+def _sanitize_tool_reviews(reviews: Any, scan: Dict) -> List[Dict[str, str]]:
+    """
+    Avis du modèle par outil : seulement des outils réellement présents dans
+    le scan avec un statut success (une clé inventée est écartée), verdict
+    dans une énumération fermée, note en texte borné, un avis par outil.
+    """
+    from utils.finding_sanitizer import clean_text
+    if not isinstance(reviews, list):
+        return []
+    known = {k for k, v in (scan or {}).items() if isinstance(v, dict) and v.get("status") == "success"}
+    out, seen = [], set()
+    for r in reviews[:120]:
+        if not isinstance(r, dict):
+            continue
+        tool = str(r.get("tool") or "").strip()
+        if tool not in known or tool in seen:
+            continue
+        verdict = str(r.get("verdict") or "").strip().lower()
+        out.append({
+            "tool": tool,
+            "verdict": verdict if verdict in _REVIEW_VERDICTS else "info",
+            "note": clean_text(r.get("note"), 200) or "",
+        })
+        seen.add(tool)
+    return out
+
+
+def _postprocess_report(report: dict, signals: dict, ctx: Dict[str, Any], used_backend: Optional[str]) -> dict:
+    """
+    Après le LLM : validation (sanitizer + B6), sévérité déterministe (B5),
+    références RAG (B7), annotation ATT&CK (phase 4), score, contrôles
+    d'ancrage/couverture. Retourne le rapport final.
+    """
+    from routes.recon import TOOLS_REGISTRY
+    from utils.finding_sanitizer import (
+        clean_text, ensure_unique_ids, sanitize_findings, sanitize_strengths,
+    )
+    from utils.rag_retrieval import attach_references
+    from utils.severity_rules import apply_severity_rules, finalize_confidence, risk_level_from_findings
+
+    report = {k: v for k, v in (report or {}).items() if k in _LLM_REPORT_KEYS}
+    scan = ctx["scan"]
+
+    # ── Validation des findings (liste blanche, bornes, B6) ──────────────────
+    # Voir utils/finding_sanitizer.py : corrige aussi les défauts de format
+    # constatés sur de vrais rapports (catégorie invalide, ID dupliqués,
+    # références gabarit "CVE-XXXX"/"example.com").
+    san_stats: Dict[str, Any] = {}
+    findings = sanitize_findings(
+        report.get("findings") or [], TOOLS_REGISTRY,
+        observed_cves=set(ctx["cves"]), observed_at=ctx["observed_at"], stats=san_stats,
+    )
+
+    # ── Sévérité déterministe (B5) ───────────────────────────────────────────
+    findings, sev_summary = apply_severity_rules(
+        findings, scan, ctx["kev"], ctx["observed_at"], ctx["observations"],
+    )
+    ensure_unique_ids(findings)
+    report["findings"]  = findings
+    report["strengths"] = sanitize_strengths(report.get("strengths"))
+    report["tool_reviews"] = _sanitize_tool_reviews(report.get("tool_reviews"), scan)
+    report["executive_summary"] = clean_text(report.get("executive_summary"), 5000)
+    actions = []
+    for a in (report.get("immediate_actions") or [])[:20] if isinstance(report.get("immediate_actions"), list) else []:
+        if isinstance(a, dict) and clean_text(a.get("action"), 500):
+            try:
+                prio = max(1, min(int(a.get("priority") or 3), 3))
+            except (TypeError, ValueError):
+                prio = 3
+            actions.append({"priority": prio, "action": clean_text(a.get("action"), 500)})
+    report["immediate_actions"] = actions
+
+    # ── Références RAG par finding (B7) ──────────────────────────────────────
+    try:
+        ref_stats = attach_references(findings, signals.get("rag_context") or [], ctx["retriever"])
+    except Exception as e:
+        logger.warning("[rag] Références RAG non attachées (%s)", e)
+        ref_stats = {"finding_queries": 0, "findings_with_rag_references": 0}
+
+    # ── Phase 4 : techniques ATT&CK rendues possibles (import protégé) ───────
+    report["findings"] = findings = _annotate_attack(findings, signals)
+
+    # ── Score déterministe, à partir des sévérités FINALES ───────────────────
+    sec = compute_security_score(report)
+    report["security_score"]     = sec["security_score"]
+    report["security_grade"]     = sec["security_grade"]
+    report["security_posture"]   = sec["security_posture"]
+    report["security_breakdown"] = sec["security_breakdown"]
+    report["findings_summary"]   = sec["findings_summary"]
+    # `risk_score` n'est plus l'auto-évaluation du modèle (bug constaté : 0/100
+    # sur example.com, et écart email/PDF documenté dans CLAUDE.md) : il est
+    # dérivé du score déterministe. La valeur du modèle reste tracée à part.
+    try:
+        report["risk_score_llm"] = max(0, min(int(report.get("risk_score")), 100))
+    except (TypeError, ValueError):
+        report["risk_score_llm"] = None
+    report["risk_score"] = 100 - sec["security_score"]
+    report["risk_level"] = risk_level_from_findings(findings)
+
+    report["mitre_attack"]       = signals.get("mitre_attack", [])
+    # Déterministe, jamais le texte du LLM — voir utils/attack_surface.py
+    # (bug réel constaté : champ absent/vide malgré des données réelles).
+    report["attack_surface"]     = build_attack_surface(signals)
+    report["_backend"]           = used_backend
+
+    # ── Contrôle d'ancrage (grounding check) — voir utils/grounding_check.py ──
+    # Vérifie programmatiquement ce que le prompt exige déjà par instruction.
+    report["grounding_check"] = compute_grounding_check(report, scan)
+    finalize_confidence(findings)
+
+    # ── Contrôle de couverture — voir utils/coverage_check.py ────────────────
+    # Question distincte du grounding check : les données collectées ont-elles
+    # ÉTÉ EXAMINÉES (pas seulement : les findings produits sont-ils exacts) ?
+    report["coverage_check"] = compute_coverage_check(
+        report, scan, signals,
+        rule_examined=(ctx["observations"].get("_examined_tools") or {}).get("tools") or [],
+    )
+    report["coverage_check"].update({
+        "rag_queries":                  ctx["rag_stats"].get("queries", 0) + ref_stats["finding_queries"],
+        "rag_filtered_by_collection":   ctx["rag_stats"].get("filtered_by_collection"),
+        "findings_with_rag_references": ref_stats["findings_with_rag_references"],
+    })
+
+    report["severity_check"] = {
+        **sev_summary,
+        "dropped_invalid":        san_stats.get("dropped_invalid", 0),
+        "dropped_unverified_cve": san_stats.get("dropped_unverified_cve", 0),
+        "cves_removed":           san_stats.get("cves_removed", []),
+        "kev":                    ctx.get("kev_status"),
+        "observed_at":            ctx["observed_at"],
+    }
+    return report
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Endpoint /analyze
 # ══════════════════════════════════════════════════════════════════════════════
 
 @analyze_bp.route("/analyze", methods=["POST"])
-@require_auth
+@require_service_or_auth
 @limiter.limit("5 per hour")
 @swag_from({
     "tags": ["IA Analysis"],
@@ -1172,7 +1496,7 @@ def analyze():
             }), 400
 
     # ── Vérification qu'au moins un backend est configuré ────────────────────
-    if not _DEEPSEEK_ENABLED and not _GEMINI_API_KEY and not _CEREBRAS_API_KEY and not _GROQ_API_KEY and not _OPENROUTER_API_KEY:
+    if not _any_backend_available():
         hint = (
             " (DEEPSEEK_API_KEY détectée mais DEEPSEEK_CONFIRM_EXTERNAL_SHARING absente — "
             "ajoutez cette variable pour l'activer)" if _DEEPSEEK_API_KEY else ""
@@ -1180,7 +1504,7 @@ def analyze():
         return jsonify({
             "success": False,
             "error": (
-                "Aucun backend IA configuré. "
+                "Aucun backend IA disponible (ni clé cloud, ni Ollama local avec son modèle). "
                 "Définissez au moins une clé dans .env : "
                 "GEMINI_API_KEY (recommandé), CEREBRAS_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, "
                 f"ou DEEPSEEK_API_KEY (payant, nécessite aussi DEEPSEEK_CONFIRM_EXTERNAL_SHARING=true).{hint}"
@@ -1219,12 +1543,12 @@ def analyze():
         f"• SPF          : {spf_val or 'voir données OSINT'}",
     ])
 
-    # Contexte RAG (OWASP Cheat Sheets / ASVS / WSTG) — requête construite à
-    # partir des mêmes signaux que search_hints, mais orientée « guidance de
-    # sécurité » plutôt que « recherche web CVE ». Dégrade silencieusement à
-    # une liste vide si le RAG est indisponible (voir utils/rag_retrieval.py).
+    # Phase 3 : constats déterministes + KEV + contexte RAG PAR CONSTAT (B7).
+    # La requête globale historique (mêmes signaux que search_hints) ne sert
+    # plus que de repli quand aucun constat n'est observé. Dégrade
+    # silencieusement si le RAG est indisponible (voir utils/rag_retrieval.py).
     _rag_query = f"Sécurité web pour {domain} — technologies: {', '.join(_tech_hints[:6])}; TLS: {tls_ver}; SPF: {spf_val}"
-    signals["rag_context"] = retrieve_relevant_docs(_rag_query)
+    p3_ctx = _prepare_phase3(recon_json, signals, _rag_query)
 
     logger.info(
         "Analyse démarrée — domaine=%s | deepseek=%s | gemini=%s | cerebras=%s | groq=%s | openrouter=%s | rounds=%d | or_rounds=%d",
@@ -1441,42 +1765,10 @@ def analyze():
                 logger.warning("Impossible d'envoyer l'email d'erreur d'analyse : %s", _mail_e)
         return jsonify({"success": False, "error": err_msg}), 500
 
-    # ── Nettoyage déterministe des findings avant scoring ────────────────────
-    # Voir utils/finding_sanitizer.py : corrige des défauts de format constatés
-    # sur de vrais rapports (catégorie invalide, ID dupliqués, références
-    # gabarit non complétées "CVE-XXXX"/"example.com") sans toucher au fond
-    # sémantique — nécessaire ici pour que `security_breakdown` (regroupé par
-    # `category`) ne fragmente pas en catégories garbage.
-    from utils.finding_sanitizer import sanitize_findings
-    from routes.recon import TOOLS_REGISTRY
-    report["findings"] = sanitize_findings(report.get("findings") or [], TOOLS_REGISTRY)
-
-    # ── Calcul du score de sécurité (toujours, même sans fusion) ─────────────
-    sec = compute_security_score(report)
-    report["security_score"]     = sec["security_score"]
-    report["security_grade"]     = sec["security_grade"]
-    report["security_posture"]   = sec["security_posture"]
-    report["security_breakdown"] = sec["security_breakdown"]
-    report["findings_summary"]   = sec["findings_summary"]
-    report["mitre_attack"]       = signals.get("mitre_attack", [])
-    # Déterministe, jamais le texte du LLM — voir utils/attack_surface.py
-    # (bug réel constaté : champ absent/vide malgré des données réelles).
-    report["attack_surface"]     = build_attack_surface(signals)
-    if report.get("strengths") is None:
-        report["strengths"] = []
-    report["_backend"]           = used_backend
-
-    # ── Contrôle d'ancrage (grounding check) — voir utils/grounding_check.py ──
-    # Vérifie programmatiquement ce que le prompt exige déjà par instruction :
-    # additif, ne modifie aucun champ existant de `report`.
-    report["grounding_check"] = compute_grounding_check(report, recon_json)
-
-    # ── Contrôle de couverture — voir utils/coverage_check.py ────────────────
-    # Question distincte du grounding check : les données collectées ont-elles
-    # ÉTÉ EXAMINÉES (pas seulement : les findings produits sont-ils exacts) ?
-    # Un outil avec des données exploitables jamais cité dans un finding est un
-    # angle mort silencieux — un score calculé sans lui n'est pas fiable.
-    report["coverage_check"] = compute_coverage_check(report, recon_json, signals)
+    # ── Post-traitement déterministe (phase 3) — voir _postprocess_report() ──
+    # Validation + B6, sévérité par règles (B5), références RAG (B7), hook
+    # ATT&CK phase 4, score, grounding_check et coverage_check.
+    report = _postprocess_report(report, signals, p3_ctx, used_backend)
 
     # Enrichir les métadonnées
     report.setdefault("domain",      domain)
@@ -1698,9 +1990,9 @@ def _run_bg_analysis(
                 f"• SPF          : {spf_val or 'voir données OSINT'}",
             ])
 
-            # Contexte RAG — voir commentaire équivalent dans analyze() (chemin sync).
+            # Constats déterministes + KEV + RAG par constat — voir analyze() (chemin sync).
             _rag_query = f"Sécurité web pour {domain} — technologies: {', '.join(_tech_hints[:6])}; TLS: {tls_ver}; SPF: {spf_val}"
-            signals["rag_context"] = retrieve_relevant_docs(_rag_query)
+            p3_ctx = _prepare_phase3(recon_json, signals, _rag_query)
 
             report       = None
             used_backend = None
@@ -1858,31 +2150,9 @@ def _run_bg_analysis(
                     except Exception: pass
                 return
 
-            # ── Nettoyage déterministe des findings avant scoring — voir
-            # commentaire équivalent dans analyze() (chemin sync) ────────────
-            from utils.finding_sanitizer import sanitize_findings
-            from routes.recon import TOOLS_REGISTRY
-            report["findings"] = sanitize_findings(report.get("findings") or [], TOOLS_REGISTRY)
-
-            sec = compute_security_score(report)
-            report["security_score"]     = sec["security_score"]
-            report["security_grade"]     = sec["security_grade"]
-            report["security_posture"]   = sec["security_posture"]
-            report["security_breakdown"] = sec["security_breakdown"]
-            report["findings_summary"]   = sec["findings_summary"]
-            report["mitre_attack"]       = signals.get("mitre_attack", [])
-            # Déterministe, jamais le texte du LLM — voir utils/attack_surface.py
-            # et le commentaire équivalent dans analyze() (chemin sync).
-            report["attack_surface"]     = build_attack_surface(signals)
-            if report.get("strengths") is None:
-                report["strengths"] = []
-            report["_backend"]           = used_backend
-
-            # ── Contrôle d'ancrage (grounding check) — additif, voir analyze() ──
-            report["grounding_check"] = compute_grounding_check(report, recon_json)
-
-            # ── Contrôle de couverture — additif, voir utils/coverage_check.py ──
-            report["coverage_check"] = compute_coverage_check(report, recon_json, signals)
+            # ── Post-traitement déterministe (phase 3) — même fonction que le
+            # chemin sync, voir _postprocess_report() ──────────────────────
+            report = _postprocess_report(report, signals, p3_ctx, used_backend)
 
             report.setdefault("domain",      domain)
             report.setdefault("analyzed_at", now.isoformat())
@@ -1936,7 +2206,7 @@ def _run_bg_analysis(
 
 
 @analyze_bp.route("/analyze/async", methods=["POST"])
-@require_auth
+@require_service_or_auth
 @limiter.limit("5 per hour")
 @swag_from({
     "tags": ["IA Analysis"],
@@ -2045,7 +2315,7 @@ def analyze_async():
         if not isinstance(model_override, str) or not _MODEL_RE.match(model_override):
             return jsonify({"success": False, "error": "Paramètre 'model' invalide."}), 400
 
-    if not _DEEPSEEK_ENABLED and not _GEMINI_API_KEY and not _CEREBRAS_API_KEY and not _GROQ_API_KEY and not _OPENROUTER_API_KEY:
+    if not _any_backend_available():
         return jsonify({"success": False, "error": "Aucun backend IA configuré."}), 503
 
     recon_record = Recon.query.get(recon_id)
@@ -2100,7 +2370,7 @@ def analyze_async():
 
 
 @analyze_bp.route("/analyze/wait/<int:recon_id>", methods=["GET", "POST"])
-@require_auth
+@require_service_or_auth
 @limiter.limit("60 per minute")
 @swag_from({
     "tags": ["IA Analysis"],

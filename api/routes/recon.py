@@ -17,6 +17,7 @@ import ssl
 import socket
 import subprocess
 import tempfile
+import time
 import json
 import re
 import hashlib
@@ -37,13 +38,23 @@ from flask import Blueprint, request, jsonify
 from flasgger import swag_from
 
 from extensions import limiter
-from utils.auth import require_auth
+from utils.auth import require_auth, require_service_or_auth
 from utils.validators import is_valid_domain, is_safe_domain
 from utils.parallel import (
     ToolTask,
     run_tools_parallel,
     DEFAULT_MAX_WORKERS as _PARALLEL_DEFAULT_WORKERS,
 )
+# Phase 5 — sources passives enrichies (modules dédiés, testables sans réseau)
+from utils.passive_sources import dns_mass as _dns_mass
+from utils.passive_sources import blocklists as _blocklists
+from utils.passive_sources import threats as _threats
+from utils.passive_sources import ranking as _ranking
+from utils.passive_sources import reputation as _reputation
+from utils.passive_sources import discovery as _discovery
+from utils.passive_sources import github_dorks as _github_dorks
+from utils.takeover_fingerprints import match_cname as match_takeover_fingerprint
+from utils.passive_sources import webpage as _webpage
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +70,62 @@ _SCAN_MAX_WORKERS = max(1, int(os.getenv('SCAN_MAX_WORKERS', str(_PARALLEL_DEFAU
 _SCAN_DEADLINE_S = float(os.getenv('SCAN_DEADLINE_SECONDS', '180'))
 
 # Outils dont le résultat alimente l'union `all_subs`.
-_SUBDOMAIN_TOOLS = ('crtsh', 'subfinder', 'assetfinder', 'github', 'amass')
+_SUBDOMAIN_TOOLS = ('crtsh', 'subfinder', 'assetfinder', 'github', 'amass', 'dnsdumpster')
+
+
+# ── Garde anti-SSRF au niveau de la session HTTP ─────────────────────────────
+class UnsafeTargetError(_requests.exceptions.RequestException):
+    """Requête refusée : l'hôte visé résout vers une adresse interne/réservée."""
+
+
+class _SsrfGuardedSession(_requests.Session):
+    """
+    Session qui valide l'hôte de CHAQUE requête envoyée, redirections comprises.
+
+    Avant ce garde, seul le domaine saisi par l'utilisateur passait par
+    `is_safe_domain` (dans `pass_recon`). Deux contournements restaient
+    ouverts, tous deux permettant de faire interroger un service interne par
+    le scanner et d'en recopier la réponse dans le rapport :
+
+    1. Les SOUS-DOMAINES découverts (`_http_headers_tool`) n'étaient jamais
+       validés : un attaquant scannant son propre domaine pouvait publier
+       `x.attaquant.tld → 169.254.169.254` (métadonnées cloud) ou une IP du
+       réseau Docker, et récupérer les en-têtes de réponse.
+    2. Les REDIRECTIONS (`allow_redirects=True`, 5 appels) étaient suivies
+       sans contrôle : le domaine validé pouvait répondre `302 Location:
+       http://10.0.0.5/`.
+
+    `requests` envoie chaque saut de redirection via `send()`, d'où la
+    validation à cet endroit plutôt que dans chaque outil. Le résultat de
+    `is_safe_domain` est mis en cache quelques secondes par hôte pour ne pas
+    refaire une résolution DNS à chaque appel d'un même service tiers.
+
+    Limite inchangée (DNS rebinding) : la connexion re-résout le nom après
+    cette vérification — voir `utils/validators.is_safe_domain`.
+    """
+
+    _CACHE_TTL_S = 30.0
+
+    def __init__(self):
+        super().__init__()
+        self._safety_cache: dict = {}
+
+    def _check_host(self, url: str) -> None:
+        host = (urlparse(url).hostname or "").lower()
+        now = time.monotonic()
+        cached = self._safety_cache.get(host)
+        if cached and now - cached[0] < self._CACHE_TTL_S:
+            safe, reason = cached[1]
+        else:
+            safe, reason = is_safe_domain(host)
+            self._safety_cache[host] = (now, (safe, reason))
+        if not safe:
+            logger.warning("[ssrf] requête bloquée vers %s : %s", host, reason)
+            raise UnsafeTargetError(reason)
+
+    def send(self, request, **kwargs):
+        self._check_host(request.url)
+        return super().send(request, **kwargs)
 
 
 # ── Session HTTP partagée (connexions persistantes + retries) ────────────────
@@ -84,7 +150,7 @@ def _build_http_session() -> "_requests.Session":
     uniquement sur les statuts listés — jamais sur une 4xx métier comme 404,
     qui est une réponse légitime signifiant « rien trouvé ».
     """
-    session = _requests.Session()
+    session = _SsrfGuardedSession()
     retry = _Retry(
         total=2,
         backoff_factor=1,
@@ -940,6 +1006,152 @@ TOOLS_REGISTRY = {
 
 
 # ===========================================================================
+# Phase 5 — collecte passive enrichie : métadonnées des nouveaux outils
+# ===========================================================================
+# Ajoutées via update() pour ne pas alourdir le littéral ci-dessus et rester
+# isolées (un seul agent possède cette section).
+TOOLS_REGISTRY.update({
+    "dns_mass": {
+        "tool": "Résolution DNS massive (B4)",
+        "category": "DNS / Réseau",
+        "description": (
+            "Résout en masse tous les sous-domaines découverts via des résolveurs "
+            "publics : statut vivant/mort, adresses IP, ASN (Team Cymru) et CDN "
+            "détecté. 100 % passif — aucune connexion à la cible, uniquement des "
+            "requêtes DNS. Les IP privées publiées dans un DNS public sont signalées."
+        ),
+        "indicators": {
+            "status": "Statut du sous-domaine : alive (IP résolue), dead (NXDOMAIN), no_address, timeout.",
+            "ips": "Adresses IP résolues (A/AAAA).",
+            "asns": "ASN d'appartenance des IP — révèle l'hébergeur et le regroupement d'infrastructure.",
+            "cdn": "CDN/hébergeur frontal détecté via le CNAME ou l'ASN (Cloudflare, Akamai…).",
+            "internal_ip_hosts": "Sous-domaines résolvant vers une IP privée/réservée (fuite d'adressage interne).",
+            "alive_count": "Nombre de sous-domaines vivants — surface d'attaque réellement exposée.",
+        },
+    },
+    "blocklists": {
+        "tool": "DNS block-lists (web-check)",
+        "category": "Réputation / Threat Intel",
+        "description": (
+            "Interroge des résolveurs DNS filtrants publics (Quad9, AdGuard, "
+            "CleanBrowsing, OpenDNS…) : le domaine est-il bloqué comme malveillant "
+            "ou indésirable ? Passif — seules des requêtes DNS vers ces résolveurs "
+            "sont émises. Un blocage par plusieurs résolveurs est un signal fort de "
+            "mauvaise réputation."
+        ),
+        "indicators": {
+            "blocked_by": "Résolveurs filtrants ayant bloqué le domaine (NXDOMAIN ou adresse puits).",
+            "blocked_count": "Nombre de résolveurs ayant bloqué — plus il est élevé, plus la réputation est dégradée.",
+            "is_blocked": "Vrai dès qu'au moins un résolveur filtrant bloque le domaine.",
+        },
+    },
+    "threats_check": {
+        "tool": "Safe Browsing + PhishTank (web-check)",
+        "category": "Réputation / Threat Intel",
+        "description": (
+            "Vérifie le domaine contre Google Safe Browsing (malware/ingénierie "
+            "sociale) et PhishTank (phishing confirmé par la communauté). Hôtes "
+            "d'API fixes, la cible n'est jamais contactée. Safe Browsing nécessite "
+            "GOOGLE_SAFE_BROWSING_API_KEY ; PhishTank fonctionne sans clé."
+        ),
+        "indicators": {
+            "flagged": "Vrai si Safe Browsing ou PhishTank signale le domaine comme malveillant.",
+            "safe_browsing": "Correspondances Safe Browsing (type de menace).",
+            "phishtank": "Présence et validité dans la base PhishTank.",
+        },
+    },
+    "web_metadata": {
+        "tool": "Cookies / social-tags / linked-pages (web-check)",
+        "category": "Web / HTTP",
+        "description": (
+            "Lit, sur la SEULE réponse de la page d'accueil, les drapeaux de "
+            "sécurité des cookies (Secure, HttpOnly, SameSite — B11), les balises "
+            "meta sociales (Open Graph / Twitter) et les domaines tiers liés depuis "
+            "le HTML. Aucune requête supplémentaire. Les valeurs des cookies ne sont "
+            "jamais conservées."
+        ),
+        "indicators": {
+            "insecure_cookies": "Cookies dépourvus de Secure et/ou HttpOnly — exposés au vol (XSS, interception).",
+            "all_cookies_secure": "Vrai uniquement si tous les cookies portent Secure ET HttpOnly.",
+            "social_tags": "Balises Open Graph / Twitter — métadonnées exposées (titre, description, images).",
+            "linked_domains": "Domaines tiers liés depuis la page — dépendances externes et surface de confiance.",
+        },
+    },
+    "site_ranking": {
+        "tool": "Tranco + HSTS preload (web-check)",
+        "category": "Web / HTTP",
+        "description": (
+            "Classement de popularité Tranco (pondère la criticité de l'exposition) "
+            "et éligibilité/état de préchargement HSTS via hstspreload.org. APIs "
+            "publiques fixes, sans clé ; la cible n'est pas contactée."
+        ),
+        "indicators": {
+            "rank": "Rang Tranco (plus il est bas, plus le site est populaire et critique).",
+            "hsts_preloaded": "Vrai si le domaine figure sur la liste de préchargement HSTS des navigateurs.",
+        },
+    },
+    "virustotal": {
+        "tool": "VirusTotal (réputation + passive DNS)",
+        "category": "Réputation / Threat Intel",
+        "description": (
+            "Réputation du domaine et des IP résolues, plus historique de "
+            "résolutions (passive DNS) via l'API VirusTotal v3. Consultation pure "
+            "des observations existantes (aucune soumission). VIRUSTOTAL_API_KEY "
+            "requis (gratuit) — outil ignoré si absent."
+        ),
+        "indicators": {
+            "domain_stats": "Verdicts des moteurs antivirus sur le domaine (malicious/suspicious/harmless).",
+            "malicious_total": "Total des détections malicious/suspicious (domaine + IP) — priorité si > 0.",
+            "passive_dns": "Résolutions IP historiques connues de VirusTotal.",
+            "ip_reputation": "Réputation des IP résolues (détections, propriétaire d'AS).",
+        },
+    },
+    "dnsdumpster": {
+        "tool": "DNSDumpster (API officielle)",
+        "category": "Subdomain Discovery",
+        "description": (
+            "Cartographie DNS passive via l'API officielle DNSDumpster : "
+            "sous-domaines, enregistrements MX et TXT, IP historiques. "
+            "DNSDUMPSTER_API_KEY requis (gratuit) — outil ignoré si absent."
+        ),
+        "indicators": {
+            "subdomains": "Sous-domaines connus de DNSDumpster (alimentent l'union all_subdomains).",
+            "mx": "Serveurs de messagerie (MX) observés.",
+            "txt": "Enregistrements TXT (SPF, vérifications de services tiers…).",
+        },
+    },
+    "grayhatwarfare": {
+        "tool": "GrayHatWarfare (buckets exposés)",
+        "category": "Vulnérabilités Passives",
+        "description": (
+            "Recherche de fichiers exposés dans des buckets cloud publics (S3, "
+            "Azure, GCP) liés au nom de l'organisation, via l'API GrayHatWarfare. "
+            "GRAYHATWARFARE_API_KEY requis — outil ignoré si absent. Priorité basse."
+        ),
+        "indicators": {
+            "files": "Fichiers exposés trouvés (bucket, chemin, taille) — fuite potentielle de données.",
+            "file_count": "Nombre de fichiers exposés correspondant au mot-clé.",
+        },
+    },
+    "github_dorks": {
+        "tool": "GitHub secret dorks",
+        "category": "Vulnérabilités Passives",
+        "description": (
+            "Recherche de code public GitHub mentionnant le domaine, croisée avec "
+            "des motifs de secrets (clés AWS/Google, tokens, clés privées…). "
+            "GITHUB_TOKEN requis. Les valeurs de secrets ne sont JAMAIS stockées : "
+            "seuls l'emplacement, le type et un fragment masqué sont conservés."
+        ),
+        "indicators": {
+            "findings": "Emplacements (dépôt + chemin) mentionnant le domaine.",
+            "confirmed_secret_count": "Nombre d'emplacements contenant un motif de secret — fuite potentielle.",
+            "secret_types": "Types de secrets détectés (masqués, jamais la valeur).",
+        },
+    },
+})
+
+
+# ===========================================================================
 # Helpers — infrastructure
 # ===========================================================================
 
@@ -1203,10 +1415,65 @@ def _amass_tool(domain: str, cwd: str = None) -> dict:
     return tool_res
 
 
+# Libellés de sous-domaine qui signalent une surface plus sensible : interfaces
+# d'administration, environnements hors production, accès distants, outillage
+# interne. Ordre = priorité décroissante (le premier mot-clé trouvé donne le
+# rang).
+_SENSITIVE_SUBDOMAIN_KEYWORDS = (
+    "admin", "vpn", "remote", "rdp", "citrix", "sso", "auth", "login",
+    "portal", "intranet", "internal", "jenkins", "gitlab", "git", "jira",
+    "confluence", "grafana", "kibana", "phpmyadmin", "cpanel", "webmail",
+    "mail", "dev", "staging", "stage", "test", "uat", "preprod", "beta",
+    "backup", "db", "api",
+)
+
+
+def _subdomain_priority(sub: str) -> int:
+    """
+    Rang de priorité d'un sous-domaine : index du premier mot-clé sensible
+    présent dans ses libellés (hors domaine parent), ou len(mots-clés) sinon.
+
+    Un mot-clé est reconnu s'il forme un libellé entier ou une partie de
+    libellé séparée par « - » (`admin.x.tld`, `admin-panel.x.tld`), pas une
+    sous-chaîne quelconque — sans cela `latest.x.tld` passerait pour `test`.
+    """
+    labels = sub.lower().split(".")[:-2] or sub.lower().split(".")[:1]
+    parts = set()
+    for label in labels:
+        parts.add(label)
+        parts.update(p for p in label.split("-") if p)
+    for rank, kw in enumerate(_SENSITIVE_SUBDOMAIN_KEYWORDS):
+        if kw in parts or any(p.startswith(kw) and p[len(kw):].isdigit() for p in parts):
+            return rank
+    return len(_SENSITIVE_SUBDOMAIN_KEYWORDS)
+
+
+def _prioritize_subdomains(subdomains, limit: int) -> list:
+    """
+    Sélectionne `limit` sous-domaines de façon DÉTERMINISTE, les plus
+    sensibles d'abord (voir `_subdomain_priority`), puis par ordre
+    alphabétique à rang égal.
+
+    Remplace deux sélections défaillantes : `sorted(...)[:10]` pour les
+    en-têtes (alphabétique pur — `a1.` passait avant `admin.` ou `vpn.`) et
+    `list(set)[:50]` pour le takeover (ordre d'un set Python, différent d'un
+    processus à l'autre — deux scans identiques ne testaient pas les mêmes
+    sous-domaines, ce qui cassait la reproductibilité).
+    """
+    unique = {s.strip().lower().rstrip(".") for s in subdomains if s and s.strip()}
+    return sorted(unique, key=lambda s: (_subdomain_priority(s), s))[:limit]
+
+
 def _http_headers_tool(subdomains) -> dict:
-    """En-têtes HTTP des premiers sous-domaines découverts (max 10)."""
+    """
+    En-têtes HTTP de 10 sous-domaines, les plus sensibles d'abord.
+
+    Chaque requête passe par la garde anti-SSRF de `_http` : un sous-domaine
+    qui résout vers une adresse interne est marqué `blocked` sans être
+    contacté.
+    """
     headers_result: dict = {}
-    targets = sorted(subdomains)[:10]
+    targets = _prioritize_subdomains(subdomains, 10)
     for sub in targets:
         hit = False
         for scheme in ("https", "http"):
@@ -1221,6 +1488,10 @@ def _http_headers_tool(subdomains) -> dict:
                     "http_status": resp.status_code,
                     "data": dict(resp.headers),
                 }
+                hit = True
+                break
+            except UnsafeTargetError as e:
+                headers_result[sub] = {"status": "blocked", "data": {}, "error": str(e)}
                 hit = True
                 break
             except _requests.exceptions.SSLError:
@@ -1386,13 +1657,28 @@ def _ssl_info(domain: str) -> dict:
     try:
         # Pré-résolution via DNS public pour contourner le résolveur Docker interne
         ips = _resolve_ips(domain)
-        connect_host = ips[0] if ips else domain
+        # IPv4 d'abord, puis IPv6, puis le nom : une IPv6 injoignable depuis
+        # Docker (Errno 101) ne doit pas faire échouer l'outil si une autre
+        # adresse répond. Une erreur TLS (certificat) n'est pas réessayée :
+        # c'est un résultat, pas une panne réseau.
+        candidates = ([ip for ip in ips if ":" not in ip]
+                      + [ip for ip in ips if ":" in ip]) or [domain]
         ctx = ssl.create_default_context()
-        with socket.create_connection((connect_host, 443), timeout=10) as sock:
-            with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
-                cert = ssock.getpeercert()
-                cipher = ssock.cipher()
-                version = ssock.version()
+        last_error = None
+        for connect_host in candidates[:4]:
+            try:
+                with socket.create_connection((connect_host, 443), timeout=10) as sock:
+                    with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
+                        cert = ssock.getpeercert()
+                        cipher = ssock.cipher()
+                        version = ssock.version()
+                break
+            except ssl.SSLError:
+                raise
+            except OSError as e:
+                last_error = e
+        else:
+            raise last_error or OSError("aucune adresse joignable")
 
         subject = dict(x[0] for x in cert.get("subject", []))
         issuer = dict(x[0] for x in cert.get("issuer", []))
@@ -2327,10 +2613,16 @@ def _tls_config(domain: str) -> dict:
 # Helpers — nouveaux outils passifs (session 2)
 # ===========================================================================
 
-def _reverse_ip(domain: str) -> dict:
-    """Trouve les domaines co-hébergés sur la même IP via HackerTarget."""
+def _reverse_ip(domain: str, ip: str = None) -> dict:
+    """
+    Trouve les domaines co-hébergés sur la même IP via HackerTarget.
+
+    `ip` (phase 8, boucle agent) : IP déjà observée à interroger directement,
+    sans résoudre `domain`. L'appelant a validé cette IP (périmètre + SSRF).
+    """
     try:
-        ips = [ip for ip in _resolve_ips(domain) if ":" not in ip]  # IPv4 seulement
+        candidates = [ip] if ip else _resolve_ips(domain)
+        ips = [i for i in candidates if ":" not in i]  # IPv4 seulement
         if not ips:
             return {"status": "error", "data": {}, "error": "Aucune IPv4 résolue", "raw_output": ""}
 
@@ -2367,7 +2659,7 @@ def _reverse_ip(domain: str) -> dict:
 _ASN_PREFIX_CAP = 100  # évite un raw_output/data démesuré pour un gros ASN (ex: Cloudflare a 5000+ préfixes)
 
 
-def _asn_info(domain: str) -> dict:
+def _asn_info(domain: str, ip: str = None) -> dict:
     """
     Récupère l'ASN et les préfixes IP de l'organisation via RIPEstat (RIPE NCC).
 
@@ -2380,9 +2672,13 @@ def _asn_info(domain: str) -> dict:
     (RIPE demande juste un paramètre `sourceapp` identifiant l'appelant, pas
     d'inscription en dessous de ~1000 requêtes/jour). Sources : RIPEstat Data
     API docs (stat.ripe.net/docs/02.data-api/), reconfirmé au 29/07/2026.
+
+    `ip` (phase 8, boucle agent) : IP déjà observée et validée par l'appelant,
+    interrogée directement sans résoudre `domain`.
     """
     try:
-        ips = [ip for ip in _resolve_ips(domain) if ":" not in ip]  # IPv4 seulement
+        candidates = [ip] if ip else _resolve_ips(domain)
+        ips = [i for i in candidates if ":" not in i]  # IPv4 seulement
         if not ips:
             return {"status": "error", "data": {}, "error": "Aucune IPv4 résolue", "raw_output": ""}
 
@@ -2608,71 +2904,71 @@ def _subdomain_takeover(all_subs: set, domain: str) -> dict:
     """
     Détecte les CNAMEs dangling potentiellement vulnérables à une prise de contrôle.
 
-    Détection strictement PASSIVE : seule la résolution DNS du CNAME est effectuée.
-    Aucune requête HTTP n'est envoyée vers la cible pour confirmer le fingerprint,
-    d'où une confiance systématiquement « medium » : le résultat signale un CNAME
-    pointant vers un service externe connu pour être « takeover-able », pas une
-    vulnérabilité confirmée.
-    """
-    TAKEOVER_SERVICES = {
-        "github.io": "GitHub Pages",
-        "herokuapp.com": "Heroku",
-        "bitbucket.io": "Bitbucket",
-        "wordpress.com": "WordPress.com",
-        "ghost.io": "Ghost",
-        "surge.sh": "Surge.sh",
-        "shopify.com": "Shopify",
-        "zendesk.com": "Zendesk",
-        "s3.amazonaws.com": "AWS S3",
-        "azurewebsites.net": "Azure Web Apps",
-        "cloudapp.net": "Azure",
-        "readthedocs.io": "ReadTheDocs",
-        "pantheonsite.io": "Pantheon",
-        "netlify.app": "Netlify",
-        "fly.io": "Fly.io",
-        "strikingly.com": "Strikingly",
-        "cargo.site": "Cargo",
-        "fastly.com": "Fastly",
-    }
+    Détection strictement PASSIVE : seule la résolution DNS est effectuée.
+    Aucune requête HTTP n'est envoyée vers la cible pour confirmer le fingerprint.
 
+    Les services reconnus viennent de can-i-take-over-xyz (utils/
+    takeover_fingerprints.py, comparaison par suffixe DNS) :
+      • « Vulnerable » → signalé, confiance « medium » ; « high » si le service
+        se reconnaît au NXDOMAIN et que la cible CNAME ne résout plus ;
+      • « Edge case » → listé à part (`edge_cases`), jamais compté vulnérable ;
+      • « Not vulnerable » (Fastly, Zendesk…) → ignoré : c'étaient des faux
+        positifs de l'ancienne liste codée en dur.
+    """
     vulnerable = []
+    edge_cases = []
     checked = 0
     raw_parts = []
 
-    targets = list(all_subs)[:50]  # Limite à 50 sous-domaines
+    # 50 sous-domaines max, sélection déterministe (reproductibilité des scans)
+    targets = _prioritize_subdomains(all_subs, 50)
     for sub in targets:
         checked += 1
         try:
             cname_answers = _resolver.resolve(sub, "CNAME")
-            for cname_rdata in cname_answers:
-                cname_target = str(cname_rdata.target).rstrip(".")
-                raw_parts.append(f"{sub} CNAME → {cname_target}")
-
-                # Vérifie si le CNAME pointe vers un service vulnérable connu
-                for service_domain, service_name in TAKEOVER_SERVICES.items():
-                    if service_domain in cname_target:
-                        vulnerable.append({
-                            "subdomain": sub,
-                            "cname": cname_target,
-                            "service": service_name,
-                            "confidence": "medium",
-                        })
-                        raw_parts.append(
-                            f"  ⚠️  CNAME dangling potentiel [{service_name}] — "
-                            f"non confirmé (détection passive)"
-                        )
-                        break
         except (_dns_resolver.NoAnswer, _dns_resolver.NXDOMAIN):
-            pass
+            continue
         except Exception:
-            pass
+            continue
+        for cname_rdata in cname_answers:
+            cname_target = str(cname_rdata.target).rstrip(".")
+            raw_parts.append(f"{sub} CNAME → {cname_target}")
+            fp = match_takeover_fingerprint(cname_target)
+            if not fp or not (fp["vulnerable"] or fp["status"] == "Edge case"):
+                continue
+            if not fp["vulnerable"]:
+                edge_cases.append({"subdomain": sub, "cname": cname_target,
+                                   "service": fp["service"], "status": fp["status"]})
+                raw_parts.append(f"  ℹ️  [{fp['service']}] cas limite selon can-i-take-over-xyz")
+                continue
+            confidence = "medium"
+            if fp["nxdomain"]:
+                try:
+                    _resolver.resolve(cname_target, "A")
+                except _dns_resolver.NXDOMAIN:
+                    confidence = "high"
+                except Exception:
+                    pass
+            vulnerable.append({
+                "subdomain": sub,
+                "cname": cname_target,
+                "service": fp["service"],
+                "confidence": confidence,
+            })
+            raw_parts.append(
+                f"  ⚠️  CNAME dangling potentiel [{fp['service']}] — "
+                f"non confirmé (détection passive, confiance {confidence})"
+            )
+            break
 
     return {
         "status": "success",
         "data": {
             "vulnerable": vulnerable,
             "vulnerable_count": len(vulnerable),
+            "edge_cases": edge_cases,
             "checked_count": checked,
+            "fingerprints_source": "can-i-take-over-xyz (CC BY 4.0)",
             # Détection passive non confirmée → au plus "high", jamais "critical"
             "risk_level": ("high" if vulnerable else "none"),
         },
@@ -3853,9 +4149,115 @@ def _urlscan_search(domain: str) -> dict:
 
 
 # ===========================================================================
+# Phase 5 — outils enrichis : wrappers reliant recon.py aux modules dédiés
+# ===========================================================================
+# Chaque wrapper fournit aux modules passifs la fonction de requête DNS (via le
+# résolveur public partagé) ou la session HTTP anti-SSRF `_http`, puis renvoie
+# le résultat au format standard. Ils restent au niveau module pour être
+# patchables par les tests comme les autres outils.
+
+# Bornes dédiées à la résolution DNS massive (surchargeables par l'environnement).
+_DNS_MASS_MAX_SUBS = max(1, int(os.getenv('DNS_MASS_MAX_SUBDOMAINS', '300')))
+_DNS_MASS_WORKERS = max(1, int(os.getenv('DNS_MASS_WORKERS', '10')))
+_DNS_MASS_BUDGET_S = float(os.getenv('DNS_MASS_BUDGET_SECONDS', '60'))
+_SHODAN_IDB_MAX_IPS = max(1, int(os.getenv('SHODAN_IDB_MAX_IPS', '50')))
+
+
+def _dns_query(name: str, rtype: str) -> list:
+    """Requête DNS via le résolveur public partagé, mappée sur les exceptions du module."""
+    try:
+        return [str(x) for x in _resolver.resolve(name, rtype)]
+    except _dns_resolver.NXDOMAIN:
+        raise _dns_mass.NXDomain(name)
+    except (_dns_resolver.NoAnswer, _dns_resolver.NoNameservers):
+        raise _dns_mass.NoAnswer(name)
+    except _dns_resolver.NXDOMAIN:
+        raise _dns_mass.NXDomain(name)
+
+
+def _dns_query_at(nameserver: str, name: str, rtype: str = "A") -> list:
+    """Requête A auprès d'un résolveur DNS précis (pour les block-lists)."""
+    res = _dns_resolver.Resolver(configure=False)
+    res.nameservers = [nameserver]
+    res.timeout = 3
+    res.lifetime = 5
+    try:
+        return [str(x) for x in res.resolve(name, rtype)]
+    except _dns_resolver.NXDOMAIN:
+        raise _blocklists.NXDomain(name)
+    except (_dns_resolver.NoAnswer, _dns_resolver.NoNameservers):
+        raise _blocklists.NoAnswer(name)
+
+
+def _dns_mass_tool(all_subs, domain: str) -> dict:
+    """B4 — résolution DNS massive de tous les sous-domaines découverts (priorisés)."""
+    subs = set(all_subs or set())
+    subs.add(domain)
+    ordered = _prioritize_subdomains(subs, _DNS_MASS_MAX_SUBS)
+    return _dns_mass.resolve_subdomains(
+        _dns_query, ordered,
+        max_subdomains=_DNS_MASS_MAX_SUBS,
+        workers=_DNS_MASS_WORKERS,
+        budget_s=_DNS_MASS_BUDGET_S,
+        max_asn_lookups=_SHODAN_IDB_MAX_IPS,
+    )
+
+
+def _blocklists_tool(domain: str) -> dict:
+    """block-lists — résolveurs DNS filtrants publics."""
+    return _blocklists.check_blocklists(_dns_query_at, domain)
+
+
+def _threats_tool(domain: str) -> dict:
+    """Safe Browsing + PhishTank."""
+    return _threats.check_threats(
+        _http, domain,
+        safe_browsing_key=os.getenv('GOOGLE_SAFE_BROWSING_API_KEY', ''),
+        phishtank_key=os.getenv('PHISHTANK_API_KEY', ''),
+    )
+
+
+def _web_metadata_tool(domain: str) -> dict:
+    """Cookies (B11) / social-tags / linked-pages, sur un unique GET de la page d'accueil."""
+    return _webpage.analyze_homepage(_http, domain)
+
+
+def _site_ranking_tool(domain: str) -> dict:
+    """Tranco + HSTS preload."""
+    return _ranking.check_ranking(_http, domain)
+
+
+def _virustotal_tool(domain: str, ips: list = None) -> dict:
+    """VirusTotal v3 — réputation domaine/IP + passive DNS."""
+    return _reputation.check_reputation(
+        _http, domain, ips=ips,
+        api_key=os.getenv('VIRUSTOTAL_API_KEY', ''),
+    )
+
+
+def _dnsdumpster_tool(domain: str) -> dict:
+    """DNSDumpster — cartographie DNS passive (API officielle)."""
+    return _discovery.check_dnsdumpster(
+        _http, domain, api_key=os.getenv('DNSDUMPSTER_API_KEY', ''),
+    )
+
+
+def _grayhatwarfare_tool(domain: str) -> dict:
+    """GrayHatWarfare — buckets cloud exposés (priorité basse)."""
+    return _discovery.check_grayhatwarfare(
+        _http, domain, api_key=os.getenv('GRAYHATWARFARE_API_KEY', ''),
+    )
+
+
+def _github_dorks_tool(domain: str) -> dict:
+    """GitHub secret dorks — extension de l'outil github (valeurs de secrets masquées)."""
+    return _github_dorks.search_dorks(_http, domain, token=os.getenv('GITHUB_TOKEN', ''))
+
+
+# ===========================================================================
 
 @pass_recon_bp.route('/pass_recon', methods=['POST'])
-@require_auth
+@require_service_or_auth
 # Limite dédiée — jusque-là seul le défaut global le protégeait, partagé avec
 # tout le reste (dashboard, n8n...) et régulièrement épuisé par du trafic de
 # routine avant même d'atteindre cet endpoint (voir extensions.py). 30/h reste
@@ -3973,6 +4375,10 @@ def _urlscan_search(domain: str) -> dict:
                                 'shodan_internetdb', 'otx_passive_dns', 'rdap_info',
                                 'xposedornot_breaches', 'abuseipdb_check', 'abusech_check',
                                 'urlscan_search',
+                                # Phase 5 — collecte passive enrichie
+                                'dns_mass', 'blocklists', 'threats_check', 'web_metadata',
+                                'site_ranking', 'virustotal', 'dnsdumpster',
+                                'grayhatwarfare', 'github_dorks',
                             ],
                         },
                         'example': ['crtsh', 'subfinder', 'ssl_info', 'email_config', 'security_headers', 'waf_detection'],
@@ -4236,6 +4642,9 @@ def run_recon():
         'abuseipdb_check', 'abusech_check',
         # OSINT Externe
         'archive_history', 'otx_passive_dns', 'gau_urls', 'urlscan_search',
+        # Phase 5 — collecte passive enrichie
+        'dns_mass', 'blocklists', 'threats_check', 'web_metadata', 'site_ranking',
+        'virustotal', 'dnsdumpster', 'grayhatwarfare', 'github_dorks',
     }
 
     requested_tools_raw = data.get('tools', list(ALL_TOOLS))
@@ -4363,18 +4772,23 @@ def run_recon():
             },
             "categories": {
                 "Domain Intelligence": ["whois", "rdap_info"],
-                "Subdomain Discovery": ["crtsh", "subfinder", "assetfinder", "amass", "github"],
-                "DNS / Réseau": ["dns", "dns_records", "dnssec", "ip_info", "ptr_records", "asn_info"],
+                "Subdomain Discovery": ["crtsh", "subfinder", "assetfinder", "amass", "github",
+                                        "dnsdumpster"],
+                "DNS / Réseau": ["dns", "dns_records", "dnssec", "ip_info", "ptr_records", "asn_info",
+                                 "dns_mass"],
                 "SSL / TLS": ["ssl_info", "tls_config", "caa_check", "dane_check"],
                 "Email / Messagerie": ["email_config", "dkim_check", "spf_analysis",
                                        "dmarc_check", "mta_sts_check", "tlsrpt_check", "bimi_check"],
                 "Web / HTTP": ["headers", "security_headers", "tech_stack", "waf_detection",
-                               "redirect_chain", "favicon_hash", "http_observatory"],
+                               "redirect_chain", "favicon_hash", "http_observatory",
+                               "web_metadata", "site_ranking"],
                 "Web / OSINT": ["robots_txt", "sitemap", "security_txt", "js_endpoints"],
                 "Infrastructure / Cloud": ["reverse_ip"],
-                "Vulnérabilités Passives": ["subdomain_takeover", "typosquatting"],
+                "Vulnérabilités Passives": ["subdomain_takeover", "typosquatting",
+                                            "grayhatwarfare", "github_dorks"],
                 "Réputation / Threat Intel": ["dnsbl_check", "shodan_internetdb", "xposedornot_breaches",
-                                              "abuseipdb_check", "abusech_check"],
+                                              "abuseipdb_check", "abusech_check",
+                                              "blocklists", "threats_check", "virustotal"],
                 "OSINT Externe": ["archive_history", "otx_passive_dns", "gau_urls", "urlscan_search"],
             },
         },
@@ -4402,6 +4816,7 @@ def run_recon():
             ('assetfinder',  lambda: _assetfinder_tool(domain, cwd=tmpdir)),
             ('github',       lambda: _github_subdomains_tool(domain, cwd=tmpdir)),
             ('amass',        lambda: _amass_tool(domain, cwd=tmpdir)),
+            ('dnsdumpster',  lambda: _dnsdumpster_tool(domain)),
             ('ip_info',      lambda: _ip_info(domain)),
         ]
         _wave1_tasks = [
@@ -4506,6 +4921,15 @@ def run_recon():
             ('abuseipdb_check',    lambda: _abuseipdb_check(domain, ips=_known_ips)),
             ('abusech_check',      lambda: _abusech_check(domain, ips=_known_ips)),
             ('urlscan_search',     lambda: _urlscan_search(domain)),
+            # Phase 5 — collecte passive enrichie
+            ('dns_mass',           lambda: _dns_mass_tool(all_subs, domain)),
+            ('blocklists',         lambda: _blocklists_tool(domain)),
+            ('threats_check',      lambda: _threats_tool(domain)),
+            ('web_metadata',       lambda: _web_metadata_tool(domain)),
+            ('site_ranking',       lambda: _site_ranking_tool(domain)),
+            ('virustotal',         lambda: _virustotal_tool(domain, ips=_known_ips)),
+            ('grayhatwarfare',     lambda: _grayhatwarfare_tool(domain)),
+            ('github_dorks',       lambda: _github_dorks_tool(domain)),
         ]
 
         _tasks = [
@@ -4552,6 +4976,20 @@ def run_recon():
                 logger.info("pass_recon — shodan_internetdb: %s (%d port(s))",
                             result["shodan_internetdb"]["status"],
                             len(result["shodan_internetdb"]["data"].get("ports", []) or []))
+
+    # ── PHASE 8 : pivots choisis par l'IA (optionnel, AGENT_RECON_ENABLED) ────
+    # Étape finale du scan : ses résultats sont mis en cache et persistés avec
+    # le reste, sous la clé `agent_pivots`. Le corps peut seulement la
+    # DÉSACTIVER (`agent_recon: false`, p. ex. pour les rescans), jamais
+    # l'activer contre la configuration. Ne lève jamais (voir recon_agent).
+    from utils.recon_agent import agent_enabled, run_agent_pivots
+    if agent_enabled() and data.get('agent_recon', True) is not False:
+        try:
+            result["agent_pivots"] = run_agent_pivots(domain, result)
+        except Exception as _agent_err:   # filet de sécurité supplémentaire
+            logger.error("pass_recon — boucle agent en échec : %s", _agent_err)
+            result["agent_pivots"] = {"status": "error", "data": {},
+                                      "error": "boucle agent en échec", "raw_output": ""}
 
     scan_duration = _time.perf_counter() - scan_start
 

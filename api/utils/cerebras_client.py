@@ -25,6 +25,10 @@ import openai
 
 logger = logging.getLogger(__name__)
 
+# Plafond de sortie : la réponse JSON contient findings ET tool_reviews.
+_MAX_OUT       = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8192"))
+_MAX_OUT_TOOLS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS_WITH_TOOLS", "4096"))
+
 _API_KEY               = os.getenv("CEREBRAS_API_KEY", "")
 _BASE_URL              = "https://api.cerebras.ai/v1"
 _DEFAULT_MODEL         = os.getenv("CEREBRAS_MODEL", "llama3.3-70b")
@@ -184,7 +188,8 @@ class CerebrasClient:
                 "model":       current,
                 "messages":    messages,
                 "temperature": temperature,
-                "max_tokens":  4096 if not tools else 2048,
+                # Réponse finale : findings + tool_reviews (un avis par outil, ~40 outils)
+                "max_tokens":  _MAX_OUT if not tools else _MAX_OUT_TOOLS,
             }
             if tools:
                 kwargs["tools"]       = tools

@@ -1,0 +1,22 @@
+{
+  "id": "csp",
+  "titre": "CSP — politique de sécurité du contenu",
+  "categorie": "Web",
+  "outils": ["security_headers", "http_observatory"],
+  "pourquoi": "L'en-tête Content-Security-Policy déclare au navigateur les origines autorisées pour les scripts, styles, images, cadres et connexions de la page. Tout ce qui n'est pas explicitement permis est bloqué. C'est la principale défense en profondeur contre l'exécution de code injecté dans une page.",
+  "risque": "Sans CSP, une faille d'injection (XSS) ou un script tiers compromis (bibliothèque chargée depuis un CDN, widget publicitaire) peut exécuter n'importe quel code dans le navigateur des visiteurs : vol de session, saisie de formulaires détournée, redirection vers un faux site. Une CSP trop permissive (unsafe-inline, unsafe-eval, joker *) n'apporte presque aucune protection.",
+  "comment_corriger": [
+    "Commencer en mode observation avec Content-Security-Policy-Report-Only et une adresse de rapport.",
+    "Inventorier les ressources réellement chargées et construire une liste blanche minimale.",
+    "Éviter unsafe-inline et unsafe-eval : préférer des nonces ou des empreintes (hash) pour les scripts en ligne.",
+    "Ajouter frame-ancestors (protection contre le clickjacking), base-uri et object-src 'none'.",
+    "Basculer en mode bloquant une fois les rapports stabilisés."
+  ],
+  "exemple": "Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-r4nd0m'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+  "references": [
+    {"titre": "OWASP — Content Security Policy Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html"},
+    {"titre": "W3C — Content Security Policy Level 3", "url": "https://www.w3.org/TR/CSP3/"},
+    {"titre": "CWE-79 — Cross-site Scripting", "url": "https://cwe.mitre.org/data/definitions/79.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

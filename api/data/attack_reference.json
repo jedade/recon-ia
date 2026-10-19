@@ -1,0 +1,523 @@
+{
+ "attack_version": "20.0",
+ "domain": "enterprise-attack",
+ "generated_at": "2026-10-19T11:26:43Z",
+ "source": "https://raw.githubusercontent.com/mitre/cti/ATT%26CK-v20.0/enterprise-attack/enterprise-attack.json",
+ "note": "Généré par data/script_mitre_attack.py — ne pas modifier à la main. groups_* : contexte seulement (relations `uses`), jamais une menace avérée.",
+ "tactics": {
+  "TA0001": {
+   "name": "Initial Access",
+   "shortname": "initial-access"
+  },
+  "TA0003": {
+   "name": "Persistence",
+   "shortname": "persistence"
+  },
+  "TA0004": {
+   "name": "Privilege Escalation",
+   "shortname": "privilege-escalation"
+  },
+  "TA0005": {
+   "name": "Stealth",
+   "shortname": "stealth"
+  },
+  "TA0006": {
+   "name": "Credential Access",
+   "shortname": "credential-access"
+  },
+  "TA0042": {
+   "name": "Resource Development",
+   "shortname": "resource-development"
+  },
+  "TA0043": {
+   "name": "Reconnaissance",
+   "shortname": "reconnaissance"
+  }
+ },
+ "techniques": {
+  "T1078": {
+   "name": "Valid Accounts",
+   "tactics": [
+    "initial-access",
+    "persistence",
+    "privilege-escalation",
+    "stealth"
+   ],
+   "mitigations": [
+    "M1013",
+    "M1015",
+    "M1017",
+    "M1018",
+    "M1026",
+    "M1027",
+    "M1032",
+    "M1036"
+   ],
+   "groups_count": 49,
+   "groups_sample": [
+    "APT18",
+    "APT28",
+    "APT29",
+    "APT33",
+    "APT39"
+   ]
+  },
+  "T1110.004": {
+   "name": "Brute Force: Credential Stuffing",
+   "tactics": [
+    "credential-access"
+   ],
+   "mitigations": [
+    "M1018",
+    "M1027",
+    "M1032",
+    "M1036"
+   ],
+   "groups_count": 2,
+   "groups_sample": [
+    "Chimera",
+    "VOID MANTICORE"
+   ]
+  },
+  "T1133": {
+   "name": "External Remote Services",
+   "tactics": [
+    "initial-access",
+    "persistence"
+   ],
+   "mitigations": [
+    "M1021",
+    "M1030",
+    "M1032",
+    "M1035",
+    "M1042"
+   ],
+   "groups_count": 28,
+   "groups_sample": [
+    "APT-C-36",
+    "APT18",
+    "APT28",
+    "APT29",
+    "APT41"
+   ]
+  },
+  "T1190": {
+   "name": "Exploit Public-Facing Application",
+   "tactics": [
+    "initial-access"
+   ],
+   "mitigations": [
+    "M1016",
+    "M1026",
+    "M1030",
+    "M1035",
+    "M1037",
+    "M1048",
+    "M1050",
+    "M1051"
+   ],
+   "groups_count": 47,
+   "groups_sample": [
+    "APT28",
+    "APT29",
+    "APT39",
+    "APT41",
+    "APT5"
+   ]
+  },
+  "T1552": {
+   "name": "Unsecured Credentials",
+   "tactics": [
+    "credential-access"
+   ],
+   "mitigations": [
+    "M1015",
+    "M1017",
+    "M1022",
+    "M1026",
+    "M1027",
+    "M1028",
+    "M1035",
+    "M1037",
+    "M1041",
+    "M1047",
+    "M1051"
+   ],
+   "groups_count": 2,
+   "groups_sample": [
+    "NIMBUS MANTICORE",
+    "Volt Typhoon"
+   ]
+  },
+  "T1552.001": {
+   "name": "Unsecured Credentials: Credentials In Files",
+   "tactics": [
+    "credential-access"
+   ],
+   "mitigations": [
+    "M1017",
+    "M1022",
+    "M1027",
+    "M1047"
+   ],
+   "groups_count": 16,
+   "groups_sample": [
+    "APT3",
+    "APT33",
+    "Ember Bear",
+    "FIN13",
+    "Fox Kitten"
+   ]
+  },
+  "T1566": {
+   "name": "Phishing",
+   "tactics": [
+    "initial-access"
+   ],
+   "mitigations": [
+    "M1017",
+    "M1021",
+    "M1031",
+    "M1047",
+    "M1049",
+    "M1054"
+   ],
+   "groups_count": 8,
+   "groups_sample": [
+    "AppleJeus",
+    "Axiom",
+    "GOLD SOUTHFIELD",
+    "INC Ransom",
+    "Kimsuky"
+   ]
+  },
+  "T1583.001": {
+   "name": "Acquire Infrastructure: Domains",
+   "tactics": [
+    "resource-development"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 48,
+   "groups_sample": [
+    "APT-C-36",
+    "APT1",
+    "APT28",
+    "APT32",
+    "APT38"
+   ]
+  },
+  "T1584.001": {
+   "name": "Compromise Infrastructure: Domains",
+   "tactics": [
+    "resource-development"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 6,
+   "groups_sample": [
+    "APT1",
+    "Kimsuky",
+    "Magic Hound",
+    "Mustard Tempest",
+    "SideCopy"
+   ]
+  },
+  "T1589.002": {
+   "name": "Gather Victim Identity Information: Email Addresses",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 14,
+   "groups_sample": [
+    "APT32",
+    "EXOTIC LILY",
+    "HAFNIUM",
+    "HEXANE",
+    "Kimsuky"
+   ]
+  },
+  "T1590.001": {
+   "name": "Gather Victim Network Information: Domain Properties",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 1,
+   "groups_sample": [
+    "Sandworm Team"
+   ]
+  },
+  "T1590.002": {
+   "name": "Gather Victim Network Information: DNS",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1054"
+   ],
+   "groups_count": 0,
+   "groups_sample": []
+  },
+  "T1590.004": {
+   "name": "Gather Victim Network Information: Network Topology",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 4,
+   "groups_sample": [
+    "FIN13",
+    "MuddyWater",
+    "Salt Typhoon",
+    "Volt Typhoon"
+   ]
+  },
+  "T1590.005": {
+   "name": "Gather Victim Network Information: IP Addresses",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 3,
+   "groups_sample": [
+    "Andariel",
+    "HAFNIUM",
+    "Magic Hound"
+   ]
+  },
+  "T1592.002": {
+   "name": "Gather Victim Host Information: Software",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 3,
+   "groups_sample": [
+    "Andariel",
+    "Magic Hound",
+    "Sandworm Team"
+   ]
+  },
+  "T1593": {
+   "name": "Search Open Websites/Domains",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1013",
+    "M1047"
+   ],
+   "groups_count": 6,
+   "groups_sample": [
+    "APT-C-36",
+    "Contagious Interview",
+    "Mustang Panda",
+    "Sandworm Team",
+    "Star Blizzard"
+   ]
+  },
+  "T1593.001": {
+   "name": "Search Open Websites/Domains: Social Media",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 3,
+   "groups_sample": [
+    "Contagious Interview",
+    "EXOTIC LILY",
+    "Kimsuky"
+   ]
+  },
+  "T1593.002": {
+   "name": "Search Open Websites/Domains: Search Engines",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 1,
+   "groups_sample": [
+    "Kimsuky"
+   ]
+  },
+  "T1593.003": {
+   "name": "Search Open Websites/Domains: Code Repositories",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1013",
+    "M1047"
+   ],
+   "groups_count": 4,
+   "groups_sample": [
+    "Contagious Interview",
+    "HAFNIUM",
+    "LAPSUS$",
+    "ShinyHunters"
+   ]
+  },
+  "T1594": {
+   "name": "Search Victim-Owned Websites",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 6,
+   "groups_sample": [
+    "EXOTIC LILY",
+    "Kimsuky",
+    "Sandworm Team",
+    "Silent Librarian",
+    "TA578"
+   ]
+  },
+  "T1596": {
+   "name": "Search Open Technical Databases",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 2,
+   "groups_sample": [
+    "APT28",
+    "Kimsuky"
+   ]
+  },
+  "T1596.001": {
+   "name": "Search Open Technical Databases: DNS/Passive DNS",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 0,
+   "groups_sample": []
+  },
+  "T1596.003": {
+   "name": "Search Open Technical Databases: Digital Certificates",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 0,
+   "groups_sample": []
+  },
+  "T1596.005": {
+   "name": "Search Open Technical Databases: Scan Databases",
+   "tactics": [
+    "reconnaissance"
+   ],
+   "mitigations": [
+    "M1056"
+   ],
+   "groups_count": 2,
+   "groups_sample": [
+    "APT41",
+    "Volt Typhoon"
+   ]
+  }
+ },
+ "mitigations": {
+  "M1013": {
+   "name": "Application Developer Guidance"
+  },
+  "M1015": {
+   "name": "Active Directory Configuration"
+  },
+  "M1016": {
+   "name": "Vulnerability Scanning"
+  },
+  "M1017": {
+   "name": "User Training"
+  },
+  "M1018": {
+   "name": "User Account Management"
+  },
+  "M1021": {
+   "name": "Restrict Web-Based Content"
+  },
+  "M1022": {
+   "name": "Restrict File and Directory Permissions"
+  },
+  "M1026": {
+   "name": "Privileged Account Management"
+  },
+  "M1027": {
+   "name": "Password Policies"
+  },
+  "M1028": {
+   "name": "Operating System Configuration"
+  },
+  "M1030": {
+   "name": "Network Segmentation"
+  },
+  "M1031": {
+   "name": "Network Intrusion Prevention"
+  },
+  "M1032": {
+   "name": "Multi-factor Authentication"
+  },
+  "M1035": {
+   "name": "Limit Access to Resource Over Network"
+  },
+  "M1036": {
+   "name": "Account Use Policies"
+  },
+  "M1037": {
+   "name": "Filter Network Traffic"
+  },
+  "M1041": {
+   "name": "Encrypt Sensitive Information"
+  },
+  "M1042": {
+   "name": "Disable or Remove Feature or Program"
+  },
+  "M1047": {
+   "name": "Audit"
+  },
+  "M1048": {
+   "name": "Application Isolation and Sandboxing"
+  },
+  "M1049": {
+   "name": "Antivirus/Antimalware"
+  },
+  "M1050": {
+   "name": "Exploit Protection"
+  },
+  "M1051": {
+   "name": "Update Software"
+  },
+  "M1054": {
+   "name": "Software Configuration"
+  },
+  "M1056": {
+   "name": "Pre-compromise"
+  }
+ }
+}

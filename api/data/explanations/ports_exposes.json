@@ -1,0 +1,20 @@
+{
+  "id": "ports_exposes",
+  "titre": "Ports et services exposés sur Internet",
+  "categorie": "Réseau",
+  "outils": ["shodan_internetdb", "ip_info", "asn_info"],
+  "pourquoi": "Chaque port ouvert sur une adresse IP publique correspond à un service joignable par le monde entier. Des moteurs comme Shodan balaient Internet en permanence et publient ce qu'ils voient : Recon-IA consulte ces observations sans jamais sonder lui-même la cible. Les services d'administration (SSH 22, RDP 3389, bases de données 3306/5432/27017, Redis 6379, Elasticsearch 9200, partage SMB 445) ne devraient presque jamais être exposés directement.",
+  "risque": "Un service d'administration exposé subit en continu des tentatives de force brute et d'exploitation automatisées ; une base de données sans authentification peut être copiée ou chiffrée contre rançon en quelques heures. Les versions logicielles visibles (CPE) associées à des CVE connues sont des cibles prioritaires pour les attaquants, surtout si la vulnérabilité figure au catalogue CISA KEV.",
+  "comment_corriger": [
+    "Inventorier les ports exposés et fermer tout ce qui n'est pas nécessaire au public.",
+    "Placer l'administration (SSH, RDP, consoles) derrière un VPN ou un bastion avec authentification forte.",
+    "Ne jamais exposer une base de données ou un cache directement à Internet.",
+    "Appliquer les correctifs de sécurité en priorité sur les services exposés présentant des CVE connues."
+  ],
+  "references": [
+    {"titre": "CISA — Known Exploited Vulnerabilities Catalog", "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"},
+    {"titre": "CWE-306 — Missing Authentication for Critical Function", "url": "https://cwe.mitre.org/data/definitions/306.html"},
+    {"titre": "CWE-668 — Exposure of Resource to Wrong Sphere", "url": "https://cwe.mitre.org/data/definitions/668.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

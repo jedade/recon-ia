@@ -32,7 +32,15 @@ def build_attack_surface(signals: dict) -> dict:
             if isinstance(items, list):
                 technologies.extend(str(i) for i in items)
 
-    shodan = signals.get("shodan_internetdb") or {}
+    # `_extract_signals` range Shodan sous `network` : la lecture à la racine
+    # (`signals["shodan_internetdb"]`) ne trouvait jamais rien, si bien que
+    # `exposed_services` restait vide même quand Shodan voyait des ports
+    # ouverts. Lecture à la racine conservée en repli pour les anciens appels.
+    shodan = (
+        (signals.get("network") or {}).get("shodan_internetdb")
+        or signals.get("shodan_internetdb")
+        or {}
+    )
     ports = shodan.get("ports") if isinstance(shodan, dict) else None
     exposed_services = [
         {"host": signals.get("domain", ""), "service_type": f"port {p}", "risk": "LOW"}

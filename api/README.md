@@ -101,9 +101,11 @@ curl http://localhost:8080/       # catalogue public
 open http://localhost:8080/apidocs
 ```
 
-⚠️ Un **second `.env` à la racine du dépôt** est nécessaire pour
-l'interpolation `${VAR}` de `docker-compose.yml` (`POSTGRES_*`,
-`DOMAIN_URL_API`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_PLAIN`). Voir le
+⚠️ Un **second `.env` à la racine du dépôt** est nécessaire : interpolation
+`${VAR}` de `docker-compose.yml` (`POSTGRES_*`, adresses Caddy) **et** seule
+source des secrets partagés avec n8n (`PIPELINE_SERVICE_TOKEN`,
+`N8N_WEBHOOK_SECRET`), ainsi que `RESULTS_ACCESS_SECRET`,
+`RESULTS_PAGE_URL` et `TURNSTILE_SECRET_KEY`. `setup.sh` le génère. Voir le
 [README racine](../README.md#deux-fichiers-env--à-ne-pas-confondre).
 
 ### En local (développement / tests)
@@ -170,17 +172,34 @@ Toutes lues depuis `api/.env`.
 |---|---|---|
 | `ADMIN_EMAIL` | — | **Obligatoire** — identifiant Basic Auth |
 | `ADMIN_PASSWORD` | — | **Obligatoire** — hash werkzeug, jamais le mot de passe en clair |
-| `ADMIN_PASSWORD_PLAIN` | vide | Mot de passe en clair, **uniquement** pour provisionner la credential Basic Auth de n8n. Vide ⇒ provisioning sauté |
 | `SECRET_KEY` | aléatoire | ≥ 32 caractères, sinon avertissement au démarrage |
+| `PIPELINE_SERVICE_TOKEN` | vide | *(.env racine)* jeton de service de n8n (`X-Service-Token`, ≥ 32 car.) — accepté seulement par les routes du pipeline. Vide ⇒ n8n ne peut pas appeler l'API |
+| `N8N_WEBHOOK_SECRET` | vide | *(.env racine)* secret envoyé par l'API au webhook n8n (`X-Pipeline-Secret`, ≥ 32 car.) |
+| `N8N_PIPELINE_WEBHOOK_URL` | `http://n8n:5678/webhook/recon-ia-pipeline` | webhook interne déclenché après validation de l'OTP |
+| `TURNSTILE_SECRET_KEY` | vide | *(.env racine)* clé secrète Cloudflare Turnstile. Vide ⇒ captcha désactivé (développement uniquement) |
+
+### Coffre des résultats et conservation
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `RESULTS_ACCESS_SECRET` | — | *(.env racine)* ≥ 32 caractères, **stable** : sert à l'empreinte de recherche des codes et aux sessions. Absent ⇒ aucun code émis. Le changer rend tous les codes émis introuvables |
+| `RESULTS_PAGE_URL` | vide | *(.env racine)* lien vers `result.html` placé dans le mail |
+| `RESULTS_ACCESS_TTL_DAYS` | `30` | validité du code d'accès |
+| `RESULTS_SESSION_TTL_SECONDS` | `3600` | durée d'une session de consultation |
+| `OTP_MAX_ATTEMPTS` | `5` | codes OTP faux tolérés par dossier avant annulation |
+| `RETENTION_INTERVAL_S` | `3600` | fréquence de la purge |
+| `RESULTS_PURGE_GRACE_DAYS` | `7` | délai après expiration/révocation avant effacement des résultats et anonymisation |
+| `UNVERIFIED_RETENTION_DAYS` | `7` | suppression des demandes jamais vérifiées |
+| `AUDIT_RETENTION_DAYS` | `90` | suppression du journal d'audit (adresses IP) |
 | `CORS_ORIGINS` | vide | Liste d'origines séparées par des virgules. Vide en production ⇒ aucune requête cross-origin |
 | `LOG_LEVEL` | `INFO` | `DEBUG` pour le détail |
 
 ### Email / SMTP
 
 `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `EMAIL_FROM`,
-`ADMIN_NOTIFICATION_EMAIL`, `OTP_TTL_SECONDS` (défaut `600`),
-`DOMAIN_URL_API` (base URL de l'API, également utilisée par n8n via
-`{{ $env.DOMAIN_URL_API }}`).
+`ADMIN_NOTIFICATION_EMAIL`, `OTP_TTL_SECONDS` (défaut `600`).
+(`DOMAIN_URL_API` et `ADMIN_PASSWORD_PLAIN` ne sont plus utilisés : n8n
+appelle `http://api:8080` avec son jeton de service.)
 
 ### Scan OSINT
 
@@ -227,8 +246,17 @@ aucune clé**. `HIBP_API_KEY` n'est plus utilisée (voir
 
 ## Authentification
 
-**HTTP Basic Auth** sur tous les endpoints sauf `GET /` (catalogue public) et
-`POST /recon` (création par un utilisateur final).
+Quatre modes d'accès :
+
+| Mode | Qui | Routes |
+|---|---|---|
+| public | demandeur, sans compte | `GET /`, `POST /auth/login`, `POST /recon`, `POST /verify_email`, `POST /results/access` |
+| session | demandeur, après saisie de son code d'accès (`Authorization: Bearer <session_token>`) | `GET /results/*` |
+| jeton de service | n8n (`X-Service-Token`) — **ou** admin | routes du pipeline |
+| admin | HTTP Basic Auth | tout le reste |
+
+Le jeton de service n'ouvre **aucune** route d'administration, et Caddy le
+retire de toute requête venue d'Internet.
 
 ```bash
 curl -u "admin@example.com:MonMotDePasse" http://localhost:8080/recon
@@ -266,7 +294,11 @@ En-têtes de sécurité ajoutés à toutes les réponses : `X-Content-Type-Optio
 
 ## Endpoints
 
-**9 blueprints** enregistrés dans `routes/__init__.py`. Les endpoints
+**11 blueprints** enregistrés dans `routes/__init__.py`. Les routes du
+pipeline (`/pass_recon`, `/analyze`, `/analyze/async`, `/analyze/wait`,
+`generate_final_report`, `generate_report`) acceptent le **jeton de
+service** de n8n (`X-Service-Token`) **ou** l'admin ; toutes les autres
+routes protégées n'acceptent que l'admin. Les endpoints
 `/crawl`, `/sublist3r`, `/crtsh`, `/sslscan`, `/holehe` et
 `/netcraft_full_report` des versions antérieures **ont été supprimés** et
 n'existent plus.
@@ -306,22 +338,28 @@ Crée un dossier et envoie un code OTP à 6 chiffres (valable
   "lastname": "Dupont",
   "email": "jean.dupont@example.com",
   "accord": true,
-  "requested_info": "Analyse SSL et sous-domaines"
+  "requested_info": "Analyse SSL et sous-domaines",
+  "turnstile_token": "<jeton du widget Cloudflare Turnstile>"
 }
 ```
 
-`accord` (consentement) est **obligatoire** et conditionne plus tard l'accès
-aux exports. `additionalProperties: false` — tout champ inconnu est rejeté.
-L'email est unique en base.
+`accord` (consentement) doit valoir **`true`** (400 sinon). `turnstile_token`
+est vérifié auprès de Cloudflare quand `TURNSTILE_SECRET_KEY` est définie
+(400 si absent ou refusé, aucun email envoyé). Un même email peut lancer
+plusieurs analyses distinctes ; un nouveau code n'est envoyé que lorsque le
+précédent a expiré (429 sinon).
 
-#### `POST /verify_email` — 10/heure
+#### `POST /verify_email` — 10/heure, **public**
 
 ```json
 { "email": "jean.dupont@example.com", "code": "123456" }
 ```
 
-Positionne `verification = true` et horodate `start_report_date`. Le code est
-à usage unique et effacé après validation (ou après expiration).
+Positionne `verification = true`, horodate `start_report_date`, puis
+**déclenche le pipeline n8n** sur le réseau interne : la réponse contient
+`pipeline_started: true|false`. Le code est à usage unique, effacé après
+validation, après expiration, ou après `OTP_MAX_ATTEMPTS` (5) essais faux
+sur le même dossier.
 
 #### `GET /recon` — liste paginée
 
@@ -496,7 +534,13 @@ en base.
 
 #### `POST /recon/<id>/generate_report` — 10/heure
 
-Génère le PDF, le stocke en base (`pdf_report`) et l'envoie par email.
+Génère le PDF et le stocke en base, puis **scelle le dossier** : les
+résultats et le PDF sont chiffrés avec une clé dérivée d'un code d'accès
+aléatoire, le clair est effacé, et le code est envoyé au demandeur par mail
+(**sans pièce jointe**). Le scellement n'est validé qu'après l'envoi réussi
+du mail ; en cas d'échec SMTP, rien n'est scellé et `email_error` le
+signale. `send_email: false` laisse le dossier en clair. La réponse contient
+`results_sealed`.
 
 ```json
 { "analysis": { }, "send_email": true }
@@ -513,7 +557,85 @@ les outils qui n'ont produit aucune donnée exploitable et pourquoi.
 
 #### `GET /recon/<id>/report.pdf`
 
-Télécharge le PDF stocké. `404` si aucun PDF n'a été généré.
+Télécharge le PDF stocké. `404` si aucun PDF n'a été généré, **`403`
+(`results_sealed: true`) si le dossier est scellé** — même règle pour
+`export.json`, `export.csv`, `generate_final_report` et `generate_report`.
+
+#### `POST /recon/<id>/issue_access` — 10/heure (admin)
+
+Rattrapage quand le mail de fin de pipeline a échoué : scelle le dossier et
+envoie un code. `409` si le dossier est déjà scellé ou n'a pas de PDF,
+`502` si l'envoi échoue (rien n'est scellé).
+
+#### `POST /recon/<id>/revoke_access` (admin)
+
+Révoque le code d'accès : les sessions ouvertes sont coupées à leur requête
+suivante. Irréversible.
+
+### Endpoints Cache des scans bruts (admin)
+
+Le cache `pass_recon_cache` conserve en clair les résultats **bruts** de
+chaque scan, par domaine (données publiques, sans analyse IA ni donnée du
+demandeur). Il n'est jamais purgé : une entrée expirée n'est plus servie au
+pipeline mais reste consultable. C'est le moyen pour l'admin de voir les
+données collectées d'un dossier scellé.
+
+- `GET /cache` — liste paginée (`page`, `per_page` ≤ 100, `domain`,
+  `valid=true|false`), métadonnées seulement.
+- `GET /cache/<id>` — entrée + résultat brut complet (`corrupted: true` si
+  le JSON stocké est illisible).
+- `GET /cache/<id>/export.json` — téléchargement.
+
+### Endpoints Graphe, différentiel et surveillance (phase 7)
+
+Détail et format du différentiel : `docs/phases/PHASE_7.md`. Données
+techniques publiques uniquement, stockées en clair (lisibles même pour un
+dossier scellé).
+
+**Admin seul** (`require_auth`, le jeton de service est refusé) :
+- `GET /graph/summary?domain=` — compteurs par type d'entité.
+- `GET /graph/entities?domain=&type=&q=&page=` — entités paginées.
+- `GET /graph/live_hosts?domain=&format=json|csv&max_age_days=90` — hôtes
+  vivants, pour une phase active **autorisée** menée hors Recon-IA.
+- `GET /graph/snapshots?domain=&significant=` · `GET /graph/snapshots/<id>` —
+  historique des différentiels.
+- `GET /recon/<id>/diff` — différentiel d'un dossier.
+- `GET|POST /monitoring`, `PATCH|DELETE /monitoring/<id>` — domaines
+  surveillés (ajout désactivé par défaut, refusé en 409 sans dossier vérifié
+  et consenti).
+
+**Jeton de service ou admin** (workflow n8n `recon-ia-rescan`, inactif par
+défaut) :
+- `GET /monitoring/due` — rescans dus (`MONITORING_MAX_PER_RUN`).
+- `POST /monitoring/<id>/ingest` — graphe et différentiel depuis le dernier
+  scan en cache ; alerte mail à l'admin si changement significatif.
+
+### Endpoints Consultation des résultats (demandeur)
+
+#### `POST /results/access` — 5/minute, 30/heure, **public**
+
+```json
+{ "code": "<code à 43 caractères reçu par mail>" }
+```
+
+Le code est lu dans le **corps** uniquement (jamais dans l'URL). Réponse :
+`{ "session_token": "...", "expires_in": 3600, "recon": { domain, status,
+security_score, security_grade, completed_at, access_expires_at } }`.
+`401` code invalide (message identique quel que soit le motif), `403`
+révoqué, `410` expiré, `503` serveur non configuré.
+
+#### `GET /results/report` — 120/heure
+
+`Authorization: Bearer <session_token>`. Rapport complet déchiffré :
+`provenance` (dont `dataset_sha256`, identique à celui calculé avant
+chiffrement), `scan_results`, `analysis_result`, `final_report`, `citation`.
+
+#### `GET /results/report.pdf` · `export.json` · `export.csv` · `export.navigator.json` — 60/heure
+
+Mêmes contenus que les exports admin, déchiffrés pour la session. Les deux
+exports exigent toujours le consentement (`403` sinon). `export.navigator.json`
+(phase 4) est un layer ATT&CK Navigator 4.5 : techniques colorées par
+sévérité maximale des constats, recalculées par la table déterministe.
 
 ### Endpoints Exports et statistiques
 
@@ -683,17 +805,25 @@ par le LLM.
 
 ## Rate limiting
 
-Limites globales par défaut : **200/jour** et **60/heure** par adresse IP.
+Limites globales par défaut : **5000/jour** et **1000/heure** par adresse IP.
+Les requêtes porteuses du **jeton de service** valide (n8n) sont exemptées de
+toutes les limites : elles partageaient l'IP du conteneur n8n, donc un
+plafond commun à tous les utilisateurs.
 
 | Endpoint | Limite |
 |---|---|
 | `POST /auth/login` | 10/minute |
 | `POST /recon` | 20/heure |
 | `POST /verify_email` | 10/heure |
+| `POST /pass_recon` | 30/heure |
 | `POST /analyze`, `POST /analyze/async` | 5/heure |
 | `GET\|POST /analyze/wait/<id>` | 60/minute |
 | `POST /recon/<id>/generate_final_report` | 20/heure |
 | `POST /recon/<id>/generate_report` | 10/heure |
+| `POST /recon/<id>/issue_access` | 10/heure |
+| `POST /results/access` | 5/minute, 30/heure |
+| `GET /results/report` | 120/heure |
+| `GET /results/report.pdf`, `export.json`, `export.csv` | 60/heure |
 
 Le stockage est **Redis** (`REDIS_URL`), partagé entre les workers gunicorn.
 Sans Redis, le repli `memory://` donne un compteur **par processus** : une
@@ -741,39 +871,48 @@ docker compose logs api | grep '\[parallel\]'   # gain réel de la parallélisat
   seule** des adresses obtenues est privée ou réservée (y compris
   `169.254.169.254`), en plus des noms locaux et internes. Limite connue et
   documentée dans le code : le **DNS rebinding** reste possible, le nom étant
-  re-résolu par chaque outil au moment de la connexion.
+  re-résolu par chaque outil au moment de la connexion. Toutes les requêtes
+  HTTP du scanner passent en plus par une session (`_SsrfGuardedSession`)
+  qui revalide l'hôte de **chaque** requête et de chaque redirection : un
+  sous-domaine découvert ou une redirection vers une adresse interne est
+  refusé sans être contacté.
+- **Résultats chiffrés** — AES-256-GCM, clé dérivée (HKDF) du code d'accès
+  du demandeur, donnée associée liant chaque chiffré à son dossier et à son
+  champ ; le serveur ne stocke que l'empreinte HMAC du code.
 - **Exécution de commandes** — jamais `shell=True` ; `_run_subprocess` reçoit
   une liste d'arguments, avec timeout explicite.
 - **Injection CSV** — les cellules d'export commençant par `=`, `+`, `-`, `@`
   sont neutralisées (CWE-1236). Les noms de fichiers `Content-Disposition` sont
   filtrés caractère par caractère.
 - **Secrets** — `.env` est couvert par `.gitignore`, aucune clé n'est
-  journalisée ni renvoyée par l'API. Le conteneur n8n ne reçoit **plus** le
-  `.env` complet : seules `DOMAIN_URL_API`, `ADMIN_EMAIL`,
-  `ADMIN_PASSWORD_PLAIN` et les variables `POSTGRES_*` lui sont injectées.
-- ⚠️ **L'UI n8n (port 5678) n'a aucune authentification** et l'accès aux
-  variables d'environnement y est activé : quiconque atteint ce port peut lire
-  `ADMIN_PASSWORD_PLAIN` et `POSTGRES_PASSWORD` en clair. Ne jamais l'exposer
-  publiquement sans authentification devant.
+  journalisée ni renvoyée par l'API. Le conteneur n8n ne reçoit que son
+  jeton de service, le secret du webhook, sa clé de chiffrement et les
+  variables `POSTGRES_*`, et l'accès à `$env` est bloqué dans ses nœuds.
+- **n8n** — publié sur `127.0.0.1` uniquement (tunnel SSH pour l'éditeur) ;
+  créer le compte propriétaire dès le premier démarrage.
 - **Taille des requêtes** — `MAX_CONTENT_LENGTH` limité à 1 Mo.
 - **CORS** — en production, `CORS_ORIGINS` vide refuse toute origine
   cross-domain (le mode « ouvert » n'existe qu'en `FLASK_ENV=development`).
-- **HTTPS** — assuré par un reverse proxy externe ; le compose n'en fournit pas.
+- **HTTPS** — assuré par Caddy (`caddy/Caddyfile`), seul service publié.
 
 ---
 
 ## Tests
 
 ```bash
-docker exec -it api python3 -m pytest       # recommandé
-cd api && python3 -m pytest                 # pytest.ini : testpaths=tests, -v --tb=short
-python3 -m pytest tests/test_export_stats.py
-python3 -m pytest --cov=. --cov-report=term-missing
+./scripts/run-tests.sh                      # recommandé : conteneur jetable, --network none
+./scripts/run-tests.sh -m security          # tests de sécurité seuls
+./scripts/run-tests.sh -m integration       # tests de bout en bout
+docker exec -it api python3 -m pytest       # alternative dans le conteneur api
 ```
 
 Suites présentes : `test_auth`, `test_crud`, `test_export_stats`,
 `test_new_tools`, `test_otp`, `test_parallel`, `test_recon_results`,
-`test_routes_scan`, `test_validators`, `test_verify_email`.
+`test_routes_scan`, `test_validators`, `test_verify_email`,
+`test_grounding_check`, et depuis le plan d'action : `test_subdomain_selection`,
+`test_attack_surface`, `test_security_ssrf`, `test_result_vault`,
+`test_results_access`, `test_pipeline_flow`, `test_retention`,
+`test_end_to_end_flow`.
 
 `config.py` détecte l'exécution sous pytest et n'écrase alors pas les variables
 posées par `tests/conftest.py` (notamment `DATABASE_URL=sqlite:///:memory:`).
@@ -802,7 +941,9 @@ api/
 │   ├── audit_log.py
 │   └── pass_recon_cache.py # Cache (domain, tools_key), TTL 30 j
 ├── routes/
-│   ├── __init__.py         # register_routes() — 9 blueprints
+│   ├── __init__.py         # register_routes() — 11 blueprints
+│   ├── results.py          # POST /results/access, GET /results/* (consultation par code)
+│   ├── cache.py            # GET /cache, /cache/<id>, export (scans bruts, admin)
 │   ├── welcome.py          # GET /
 │   ├── auth.py             # POST /auth/login
 │   ├── crud.py             # /recon, /verify_email, /recon/<id>/result, /report
@@ -815,7 +956,11 @@ api/
 ├── utils/
 │   ├── parallel.py         # run_tools_parallel — isolation + borne de temps
 │   ├── validators.py       # is_valid_domain, is_safe_domain (anti-SSRF)
-│   ├── auth.py             # @require_auth (Basic Auth)
+│   ├── auth.py             # @require_auth (Basic Auth), @require_service_or_auth (jeton n8n)
+│   ├── result_vault.py     # code d'accès, chiffrement AES-GCM, sessions
+│   ├── captcha.py          # vérification Cloudflare Turnstile
+│   ├── pipeline_trigger.py # API → webhook n8n interne
+│   ├── retention.py        # purge RGPD horaire
 │   ├── gemini_client.py · cerebras_client.py · groq_client.py
 │   ├── openrouter_client.py · ollama_client.py
 │   ├── web_search.py       # DuckDuckGo (ddgs) ou Tavily
@@ -823,7 +968,7 @@ api/
 │   ├── final_report_generator.py
 │   ├── pdf_generator.py    # dont la section « Méthodologie & Sources »
 │   ├── mitre_attack.py     # Mapping déterministe outils → ATT&CK
-│   ├── email_sender.py     # OTP + envoi du rapport
+│   ├── email_sender.py     # OTP + mail « rapport prêt » (code d'accès, sans pièce jointe)
 │   └── command_runner.py   # (non importé actuellement)
 ├── errors/handlers.py      # 400/401/403/404/405/429/500 en JSON
 ├── templates/redoc.html

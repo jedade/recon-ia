@@ -17,6 +17,24 @@ Endpoints PDF :
 
   GET  /recon/<id>/export.csv
       → Une ligne par finding, colonnes stables pour analyse tabulaire
+
+  POST /recon/<id>/issue_access   (admin)
+      → Réémet le code d'accès d'un dossier pas encore scellé (mail en échec)
+
+  POST /recon/<id>/revoke_access  (admin)
+      → Révoque le code d'accès d'un dossier
+
+Coffre des résultats (2026-10-19) : en fin de pipeline, generate_report
+scelle le dossier (utils/result_vault.py) et envoie le code d'accès par
+mail, sans pièce jointe. Une fois scellé, les routes admin ci-dessus ne
+peuvent plus lire le contenu (403) : seul le demandeur, avec son code, le
+consulte via routes/results.py.
+
+Graphe et différentiel (phase 7) : juste avant le PDF et le scellement,
+generate_report alimente le graphe d'entités et enregistre le différentiel
+avec le scan précédent du même domaine (`_record_graph_and_diff`, tables
+entity/relation/scan_snapshot, en clair car limitées à des données
+techniques publiques — voir models/scan_monitoring.py).
 """
 
 import csv
@@ -24,6 +42,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 from datetime import datetime
 from typing import Optional
@@ -34,9 +53,11 @@ from flasgger import swag_from
 from database import db
 from extensions import limiter
 from models.recon import Recon, utc_iso, utc_now_iso
-from utils.auth import require_auth
+from utils import result_vault
+from utils.auth import require_auth, require_service_or_auth
 from utils.pdf_generator import generate_pdf
-from utils.email_sender import send_report_email, send_error_notification
+from utils.attack_enablement import annotate_findings, attack_csv_fields
+from utils.email_sender import send_results_ready_email, send_error_notification
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +73,7 @@ _EXPORT_SCHEMA_VERSION = '1.0'
 _CSV_COLUMNS = [
     'finding_id', 'tool', 'tool_category', 'target', 'indicator', 'value',
     'severity', 'confidence', 'source_tool', 'source_url', 'collected_at',
-    'grounding_status',
+    'grounding_status', 'observed_at', 'severity_rule', 'attack_enabled', 'mitigations',
 ]
 
 # Marque d'ordre des octets UTF-8 — préfixe le CSV pour qu'Excel affiche
@@ -171,35 +192,54 @@ def _compute_timing(recon: Recon, analysis: dict) -> dict:
     return timing
 
 
-def _load_analysis_from_db(recon: Recon) -> Optional[dict]:
-    """Charge et désérialise analysis_result depuis la BD."""
-    if not recon.analysis_result:
+def _parse_json_text(text: Optional[str], label: str, recon_id) -> Optional[dict]:
+    """Désérialise un champ JSON stocké en Text ; None si absent ou corrompu."""
+    if not text:
         return None
     try:
-        return json.loads(recon.analysis_result)
+        return json.loads(text)
     except Exception:
-        logger.warning(
-            'analysis_result illisible (JSON corrompu) — recon_id=%s', recon.id,
-            exc_info=True,
-        )
+        logger.warning('%s illisible (JSON corrompu) — recon_id=%s', label, recon_id,
+                       exc_info=True)
         return None
+
+
+def _load_analysis_from_db(recon: Recon) -> Optional[dict]:
+    """Charge et désérialise analysis_result depuis la BD."""
+    return _parse_json_text(recon.analysis_result, 'analysis_result', recon.id)
 
 
 def _load_scan_from_db(recon: Recon) -> Optional[dict]:
     """Charge et désérialise scan_results depuis la BD."""
-    if not recon.scan_results:
-        return None
-    try:
-        return json.loads(recon.scan_results)
-    except Exception:
-        logger.warning(
-            'scan_results illisible (JSON corrompu) — recon_id=%s', recon.id,
-            exc_info=True,
-        )
-        return None
+    return _parse_json_text(recon.scan_results, 'scan_results', recon.id)
 
 
-def _integrity_report(recon: Recon, scan_results, analysis_result) -> dict:
+def _raw_fields(recon: Recon) -> dict:
+    """Valeurs brutes (texte) des champs exportables, depuis les colonnes en clair."""
+    return {name: getattr(recon, name) for name in result_vault.BUNDLE_FIELDS}
+
+
+def _sealed_error(recon: Recon):
+    """
+    Refuse l'accès admin au CONTENU d'un dossier scellé.
+
+    Une fois chiffré, le contenu n'est plus lisible côté serveur sans le code
+    du demandeur (décision D3) : renvoyer un 403 explicite plutôt qu'un
+    « absent » trompeur, qui laisserait croire que le scan n'a rien produit.
+    """
+    if recon.sealed_at is not None:
+        return jsonify({
+            'success': False,
+            'error': (
+                "Résultats chiffrés : ce dossier n'est consultable qu'avec le code "
+                "d'accès envoyé au demandeur (page « Voir le résultat »)."
+            ),
+            'results_sealed': True,
+        }), 403
+    return None
+
+
+def _integrity_report(recon: Recon, scan_results, analysis_result, raw: Optional[dict] = None) -> dict:
     """
     Distingue « donnée absente » de « donnée présente mais illisible ».
 
@@ -208,37 +248,48 @@ def _integrity_report(recon: Recon, scan_results, analysis_result) -> dict:
     annonçant « 0 outils passifs » — c'est-à-dire un jeu de données faux
     présenté comme authentique. Inacceptable pour une donnée destinée à être
     citée : on expose explicitement l'écart.
+
+    `raw` : valeurs brutes des champs (déchiffrées pour un dossier scellé) ;
+    par défaut, les colonnes en clair du dossier.
     """
+    raw = raw if raw is not None else _raw_fields(recon)
+    scan_stored = raw.get('scan_results') is not None
+    analysis_stored = raw.get('analysis_result') is not None
     return {
-        'scan_results_stored':     recon.scan_results is not None,
+        'scan_results_stored':     scan_stored,
         'scan_results_parsed':     scan_results is not None,
-        'analysis_result_stored':  recon.analysis_result is not None,
+        'analysis_result_stored':  analysis_stored,
         'analysis_result_parsed':  analysis_result is not None,
         'corrupted': bool(
-            (recon.scan_results is not None and scan_results is None)
-            or (recon.analysis_result is not None and analysis_result is None)
+            (scan_stored and scan_results is None)
+            or (analysis_stored and analysis_result is None)
         ),
     }
 
 
-def _load_final_report_from_db(recon: Recon) -> Optional[dict]:
+def _parse_final_report(text: Optional[str]) -> Optional[dict]:
     """
-    Charge final_report depuis la BD.
+    Désérialise final_report.
 
     Le champ est stocké en Text : soit du JSON sérialisé (rapport narratif IA
     produit par generate_final_report), soit du texte libre (ancien flux n8n).
     Retourne le dict désérialisé si possible, sinon {'text': <contenu brut>}
     pour ne jamais perdre de données à l'export.
     """
-    if not recon.final_report:
+    if not text:
         return None
     try:
-        parsed = json.loads(recon.final_report)
+        parsed = json.loads(text)
         if isinstance(parsed, dict):
             return parsed
         return {'value': parsed}
     except Exception:
-        return {'text': recon.final_report}
+        return {'text': text}
+
+
+def _load_final_report_from_db(recon: Recon) -> Optional[dict]:
+    """Charge final_report depuis les colonnes en clair de la BD."""
+    return _parse_final_report(recon.final_report)
 
 
 # ── Helpers d'export académique ───────────────────────────────────────────────
@@ -330,7 +381,7 @@ def _cache_hit(scan_results: Optional[dict]):
     return None
 
 
-def _build_provenance(recon: Recon, scan_results, analysis_result) -> dict:
+def _build_provenance(recon: Recon, scan_results, analysis_result, raw: Optional[dict] = None) -> dict:
     """Construit le bloc de provenance/reproductibilité de l'export."""
     tools = _tools_inventory(scan_results)
     analysis = analysis_result if isinstance(analysis_result, dict) else {}
@@ -346,7 +397,7 @@ def _build_provenance(recon: Recon, scan_results, analysis_result) -> dict:
         'ai_backend_used': analysis.get('model_used'),
         'cache_hit':       _cache_hit(scan_results),
         'dataset_sha256':  _dataset_sha256(scan_results),
-        'data_integrity':  _integrity_report(recon, scan_results, analysis_result),
+        'data_integrity':  _integrity_report(recon, scan_results, analysis_result, raw),
         'scan_started_at':   utc_iso(recon.started_at),
         'scan_completed_at': utc_iso(recon.completed_at),
         'analysis_generated_at': utc_iso(recon.analysis_generated_at),
@@ -354,14 +405,30 @@ def _build_provenance(recon: Recon, scan_results, analysis_result) -> dict:
             'Reconnaissance passive uniquement — aucune interaction intrusive '
             'avec les systèmes cibles.'
         ),
+        'publisher':       _publisher(),
     }
+
+
+def _publisher() -> dict:
+    """
+    Éditeur des exports (charte ReconIA). Un JSON ne peut pas contenir
+    d'image : le logo est référencé par son URL publique, déduite de
+    RESULTS_PAGE_URL (même site que la page « Voir le résultat »), et omis
+    si cette URL n'est pas configurée en http(s).
+    """
+    info = {'name': 'ReconIA', 'tagline': 'De la donnée à la décision',
+            'pillars': ['Veille', 'Analyse', 'Intelligence'], 'website': 'https://idachallenge.bj'}
+    page = os.getenv('RESULTS_PAGE_URL', '')
+    if page.startswith(('https://', 'http://')):
+        info['logo_url'] = page.rsplit('/', 1)[0] + '/assets/brand/reconia-logo.png'
+    return info
 
 
 def _build_citation(recon: Recon, provenance: dict) -> str:
     """
     Chaîne de citation prête à être reprise dans un article.
 
-    Format : Recon-IA, scan of {domain}, {date UTC}, N outils passifs ({liste}),
+    Format : ReconIA, scan of {domain}, {date UTC}, N outils passifs ({liste}),
              dataset SHA-256: {hash}
     """
     tools = provenance.get('tools_requested') or []
@@ -370,7 +437,7 @@ def _build_citation(recon: Recon, provenance: dict) -> str:
         or provenance.get('generated_at')
     )
     return (
-        f"Recon-IA, scan of {recon.domain}, {scan_date}, "
+        f"ReconIA, scan of {recon.domain}, {scan_date}, "
         f"{len(tools)} outils passifs ({', '.join(tools) if tools else 'aucun'}), "
         f"dataset SHA-256: {provenance.get('dataset_sha256') or 'n/a'}"
     )
@@ -431,6 +498,12 @@ def _finding_rows(recon: Recon, scan_results, analysis_result) -> list:
             source_url = str(web_sources or '')
 
         confidence = finding.get('confidence')
+        # Techniques rendues possibles / mitigations : recalculées par la table
+        # déterministe (phase 4), jamais reprises telles quelles du LLM.
+        try:
+            attack = attack_csv_fields(annotate_findings([dict(finding)], {})[0])
+        except Exception:
+            attack = {'attack_enabled': '', 'mitigations': ''}
         grounding = finding.get('grounding')
         grounding_status = grounding.get('status', '') if isinstance(grounding, dict) else ''
 
@@ -447,14 +520,156 @@ def _finding_rows(recon: Recon, scan_results, analysis_result) -> list:
             'source_url':    source_url,
             'collected_at':  collected_at,
             'grounding_status': grounding_status,
+            'observed_at':   finding.get('observed_at') or collected_at,
+            'severity_rule': finding.get('severity_rule') or '',
+            'attack_enabled': attack['attack_enabled'],
+            'mitigations':   attack['mitigations'],
         })
     return rows
+
+
+# ── Construction des exports (partagée admin / consultation par code) ────────
+
+def build_export_json(recon: Recon, raw: dict) -> tuple:
+    """
+    Construit l'export JSON à partir des valeurs brutes des champs (`raw`).
+    Retourne (corps, nom_de_fichier). Partagé par l'export admin (colonnes en
+    clair) et par la consultation par code (routes/results.py, valeurs
+    déchiffrées) : les deux produisent un export strictement identique, donc
+    le même `dataset_sha256`.
+    """
+    scan_results    = _parse_json_text(raw.get('scan_results'), 'scan_results', recon.id)
+    analysis_result = _parse_json_text(raw.get('analysis_result'), 'analysis_result', recon.id)
+    final_report    = _parse_final_report(raw.get('final_report'))
+
+    provenance = _build_provenance(recon, scan_results, analysis_result, raw)
+    payload = {
+        'provenance':      provenance,
+        'scan_results':    scan_results,
+        'analysis_result': analysis_result,
+        'final_report':    final_report,
+        'citation':        _build_citation(recon, provenance),
+    }
+    logger.info(
+        '[export.json] recon_id=%d domain=%s outils=%d sha256=%s',
+        recon.id, recon.domain, len(provenance['tools_requested']),
+        (provenance['dataset_sha256'] or 'n/a')[:12],
+    )
+    filename = f'reconia_export_{_safe_filename_part(recon.domain)}_{recon.id}.json'
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str), filename
+
+
+def build_export_csv(recon: Recon, raw: dict) -> tuple:
+    """Construit l'export CSV des findings. Retourne (corps, nom_de_fichier)."""
+    scan_results    = _parse_json_text(raw.get('scan_results'), 'scan_results', recon.id)
+    analysis_result = _parse_json_text(raw.get('analysis_result'), 'analysis_result', recon.id)
+    rows = _finding_rows(recon, scan_results, analysis_result)
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=_CSV_COLUMNS, extrasaction='ignore')
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _csv_safe(value) for key, value in row.items()})
+
+    logger.info('[export.csv] recon_id=%d domain=%s lignes=%d', recon.id, recon.domain, len(rows))
+    filename = f'reconia_constats_{_safe_filename_part(recon.domain)}_{recon.id}.csv'
+    # BOM UTF-8 : Excel ouvre correctement les accents des libellés français
+    return _UTF8_BOM + buffer.getvalue(), filename
+
+
+def pdf_filename(recon: Recon) -> str:
+    return f'reconia_rapport_{_safe_filename_part(recon.domain)}_{recon.id}.pdf'
+
+
+def _results_page_url() -> str:
+    return os.getenv('RESULTS_PAGE_URL', '').strip()
+
+
+def _seal_and_notify(recon: Recon, analysis: dict) -> tuple:
+    """
+    Scelle le dossier et envoie le code d'accès par mail.
+
+    Le scellement n'est COMMITÉ qu'après l'envoi réussi du mail : sinon le
+    code (jamais stocké) serait perdu et les résultats chiffrés illisibles à
+    jamais. En cas d'échec d'envoi, la transaction est annulée — le clair est
+    conservé et l'admin peut réessayer via POST /recon/<id>/issue_access.
+
+    Retourne (email_envoyé: bool, erreur: str|None).
+    """
+    if not result_vault.is_configured():
+        logger.error('[vault] RESULTS_ACCESS_SECRET absent — aucun code émis pour recon_id=%d',
+                     recon.id)
+        return False, "RESULTS_ACCESS_SECRET non configuré : code d'accès non émis"
+
+    score = analysis.get('security_score')
+    if score is None:
+        score = analysis.get('risk_score')
+    try:
+        code = result_vault.seal_recon(recon)
+        send_results_ready_email(
+            to_email    = recon.email,
+            firstname   = recon.firstname,
+            lastname    = recon.lastname,
+            domain      = recon.domain,
+            access_code = code,
+            expires_at  = recon.access_expires_at,
+            risk_level  = analysis.get('risk_level', 'N/A'),
+            risk_score  = score,
+            nb_findings = len(analysis.get('findings', []) or []),
+            results_url = _results_page_url(),
+        )
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error('[vault] Scellement/envoi annulé — recon_id=%d : %s', recon.id, e)
+        return False, str(e)
+    logger.info('[vault] Dossier scellé, code envoyé — recon_id=%d expire=%s',
+                recon.id, recon.access_expires_at)
+    return True, None
+
+
+def _record_graph_and_diff(recon: Recon, scan_data: Optional[dict]) -> Optional[dict]:
+    """
+    Phase 7 : alimente le graphe d'entités et calcule le différentiel avec le
+    scan précédent du même domaine, AVANT le scellement (après, le serveur ne
+    peut plus relire scan_results). N'enregistre que des données techniques
+    publiques (utils/entity_graph.py, utils/scan_diff.py), en clair.
+
+    Ne bloque JAMAIS le pipeline : toute erreur est journalisée, la
+    transaction de cette étape annulée, et le rapport continue sans
+    différentiel. Doit être appelée quand le dossier n'a aucune modification
+    en attente (le rollback ne doit rien emporter d'autre).
+
+    Retourne un résumé {significant, change_count, has_previous, summary} ou None.
+    """
+    if not isinstance(scan_data, dict) or not scan_data:
+        return None
+    from utils.entity_graph import build_graph_from_raw
+    from utils.scan_diff import record_scan
+    now = datetime.utcnow()
+    scan_ref = f'recon:{recon.id}'
+    try:
+        build_graph_from_raw(recon.domain, scan_data, scan_ref=scan_ref, now=now, recon_id=recon.id)
+        snapshot = record_scan(recon.domain, scan_data, scan_ref=scan_ref, now=now,
+                               recon_id=recon.id, source='pipeline')
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.warning('[graph] graphe/différentiel non enregistrés — recon_id=%d : %s', recon.id, e)
+        return None
+    diff = snapshot.get_diff() or {}
+    return {
+        'significant':  bool(diff.get('significant')),
+        'change_count': diff.get('change_count', 0),
+        'has_previous': bool(diff.get('has_previous')),
+        'summary':      diff.get('summary') or [],
+    }
 
 
 # ── POST /recon/<id>/generate_final_report ────────────────────────────────────
 
 @report_bp.route('/recon/<int:recon_id>/generate_final_report', methods=['POST'])
-@require_auth
+@require_service_or_auth
 @limiter.limit('20 per hour')
 @swag_from({
     'tags': ['Rapport Final IA'],
@@ -509,6 +724,9 @@ def generate_final_report_endpoint(recon_id: int):
     force_regenerate = body.get('force_regenerate', False)
 
     recon = Recon.query.get_or_404(recon_id)
+    sealed = _sealed_error(recon)
+    if sealed:
+        return sealed
 
     # Retourner le cache si déjà généré et non forcé
     if recon.final_report and not force_regenerate:
@@ -608,7 +826,7 @@ def generate_final_report_endpoint(recon_id: int):
 # ── POST /recon/<id>/generate_report ─────────────────────────────────────────
 
 @report_bp.route('/recon/<int:recon_id>/generate_report', methods=['POST'])
-@require_auth
+@require_service_or_auth
 @limiter.limit('10 per hour')
 @swag_from({
     'tags': ['Rapport PDF'],
@@ -670,6 +888,9 @@ def generate_report(recon_id: int):
     send_email = body.get('send_email', True)
 
     recon = Recon.query.get_or_404(recon_id)
+    sealed = _sealed_error(recon)
+    if sealed:
+        return sealed
 
     # Charger l'analyse depuis la BD si non fournie dans le body
     if not analysis or not isinstance(analysis, dict):
@@ -698,6 +919,13 @@ def generate_report(recon_id: int):
         except Exception:
             pass
 
+    # Graphe d'entités + différentiel avec le scan précédent (phase 7) — ICI,
+    # avant toute modification du dossier dans cette requête (voir la
+    # docstring : l'étape a sa propre transaction) et avant le scellement.
+    # (_load_scan_from_db capture déjà toute erreur et retourne None)
+    scan_data = _load_scan_from_db(recon)
+    scan_diff_summary = _record_graph_and_diff(recon, scan_data)
+
     # ⚠️ end_report_date/execution_time DOIVENT être posés AVANT _compute_timing()
     # — corrigé (2026-07-30). Bug réel constaté sur un PDF généré : "Durée totale"
     # affichait "—" malgré un execution_time correct en base (~1min37) une fois
@@ -722,9 +950,9 @@ def generate_report(recon_id: int):
         recon_id, recon.domain, timing,
     )
 
-    # Charger scan_results pour la section infrastructure du PDF
-    # (_load_scan_from_db capture déjà toute erreur et retourne None)
-    scan_data = _load_scan_from_db(recon)
+    # scan_data (section infrastructure du PDF) est déjà chargé plus haut.
+    # Le différentiel complet du dossier est disponible pour le PDF via
+    # utils.scan_diff.diff_for_recon(recon.id) (intégration : phase 4).
 
     # Générer le PDF
     recon.set_step('generating_pdf')
@@ -780,37 +1008,16 @@ def generate_report(recon_id: int):
     logger.info('PDF enregistré en BD — recon_id=%d taille=%d octets statut=success',
                 recon_id, len(pdf_bytes))
 
-    # Envoyer par email
+    # Scellement + mail « rapport prêt » avec le code d'accès (décisions D1-D3 :
+    # plus de PDF joint, résultats chiffrés). Le score du mail suit la même
+    # préférence que le PDF : security_score (recalculé) avant risk_score (brut
+    # LLM) — voir _seal_and_notify. `send_email=false` laisse le dossier en
+    # clair (usage admin/tests) : sans mail, il n'y aurait personne pour
+    # détenir le code.
     email_sent  = False
     email_error = None
     if send_email:
-        try:
-            # Préférer security_score (recalculé déterministiquement par
-            # compute_security_score, voir utils/analysis_merger.py) à
-            # risk_score (brut, auto-évalué par le LLM, jamais recalculé) —
-            # même ordre de préférence que le PDF (utils/pdf_generator.py
-            # ::_build_cover) et que la colonne dénormalisée recon.security_score.
-            # Avant ce correctif, l'email utilisait risk_score directement :
-            # un même scan pouvait afficher deux scores différents entre
-            # l'email et le PDF (ex. 72 vs 60 sur un cas réel constaté).
-            _email_score = analysis.get('security_score') if analysis.get('security_score') is not None \
-                else analysis.get('risk_score', 0)
-            send_report_email(
-                to_email   = recon.email,
-                firstname  = recon.firstname,
-                lastname   = recon.lastname,
-                domain     = recon.domain,
-                risk_level = analysis.get('risk_level', 'N/A'),
-                risk_score = _email_score,
-                pdf_bytes  = pdf_bytes,
-                timing     = timing,
-                nb_findings= len(analysis.get('findings', []) or []),
-            )
-            email_sent = True
-            logger.info('Email rapport envoyé à %s — recon_id=%d', recon.email, recon_id)
-        except Exception as e:
-            email_error = str(e)
-            logger.error('Échec envoi email rapport à %s : %s', recon.email, e)
+        email_sent, email_error = _seal_and_notify(recon, analysis)
 
     return jsonify({
         'success': True,
@@ -821,6 +1028,7 @@ def generate_report(recon_id: int):
             'pdf_generated_at': now.isoformat(),
             'email_sent':       email_sent,
             'email_error':      email_error,
+            'results_sealed':   recon.sealed_at is not None,
             'timing':           timing,
             'risk_level':       analysis.get('risk_level'),
             'risk_score':       analysis.get('risk_score'),
@@ -828,6 +1036,7 @@ def generate_report(recon_id: int):
             'security_grade':   analysis.get('security_grade'),
             'findings_count':   len(analysis.get('findings', []) or []),
             'has_final_report': final_report_data is not None,
+            'scan_diff':        scan_diff_summary,
         },
     }), 200
 
@@ -851,6 +1060,9 @@ def generate_report(recon_id: int):
 def download_report(recon_id: int):
     """Retourne le PDF stocké en base pour cet enregistrement."""
     recon = Recon.query.get_or_404(recon_id)
+    sealed = _sealed_error(recon)
+    if sealed:
+        return sealed
 
     if not recon.pdf_report:
         return jsonify({
@@ -861,12 +1073,11 @@ def download_report(recon_id: int):
             ),
         }), 404
 
-    filename = f'rapport_osint_{_safe_filename_part(recon.domain)}_{recon_id}.pdf'
     return send_file(
         io.BytesIO(recon.pdf_report),
         mimetype='application/pdf',
         as_attachment=True,
-        download_name=filename,
+        download_name=pdf_filename(recon),
     )
 
 
@@ -901,32 +1112,11 @@ def export_json(recon_id: int):
     """Exporte l'intégralité des données d'une reconnaissance avec sa provenance."""
     recon = Recon.query.get_or_404(recon_id)
 
-    blocked = _consent_error(recon)
+    blocked = _consent_error(recon) or _sealed_error(recon)
     if blocked:
         return blocked
 
-    scan_results    = _load_scan_from_db(recon)
-    analysis_result = _load_analysis_from_db(recon)
-    final_report    = _load_final_report_from_db(recon)
-
-    provenance = _build_provenance(recon, scan_results, analysis_result)
-
-    payload = {
-        'provenance':      provenance,
-        'scan_results':    scan_results,
-        'analysis_result': analysis_result,
-        'final_report':    final_report,
-        'citation':        _build_citation(recon, provenance),
-    }
-
-    logger.info(
-        '[export.json] recon_id=%d domain=%s outils=%d sha256=%s',
-        recon_id, recon.domain, len(provenance['tools_requested']),
-        (provenance['dataset_sha256'] or 'n/a')[:12],
-    )
-
-    filename = f'recon_ia_export_{_safe_filename_part(recon.domain)}_{recon_id}.json'
-    body = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    body, filename = build_export_json(recon, _raw_fields(recon))
     response = Response(body, mimetype='application/json; charset=utf-8')
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
@@ -967,26 +1157,76 @@ def export_csv(recon_id: int):
     """Exporte les findings d'une reconnaissance en CSV, une ligne par finding."""
     recon = Recon.query.get_or_404(recon_id)
 
-    blocked = _consent_error(recon)
+    blocked = _consent_error(recon) or _sealed_error(recon)
     if blocked:
         return blocked
 
-    scan_results    = _load_scan_from_db(recon)
-    analysis_result = _load_analysis_from_db(recon)
-    rows = _finding_rows(recon, scan_results, analysis_result)
-
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=_CSV_COLUMNS, extrasaction='ignore')
-    writer.writeheader()
-    for row in rows:
-        writer.writerow({key: _csv_safe(value) for key, value in row.items()})
-
-    logger.info('[export.csv] recon_id=%d domain=%s lignes=%d',
-                recon_id, recon.domain, len(rows))
-
-    filename = f'recon_ia_findings_{_safe_filename_part(recon.domain)}_{recon_id}.csv'
-    # BOM UTF-8 : Excel ouvre correctement les accents des libellés français
-    body = _UTF8_BOM + buffer.getvalue()
+    body, filename = build_export_csv(recon, _raw_fields(recon))
     response = Response(body, mimetype='text/csv; charset=utf-8')
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+
+# ── POST /recon/<id>/issue_access — réémission du code (admin) ────────────────
+
+@report_bp.route('/recon/<int:recon_id>/issue_access', methods=['POST'])
+@require_auth
+@limiter.limit('10 per hour')
+@swag_from({
+    'tags': ['Accès aux résultats'],
+    'security': [{'basicAuth': []}],
+    'summary': "Émettre le code d'accès d'un dossier non encore scellé",
+    'description': (
+        "Rattrapage quand le mail « rapport prêt » a échoué en fin de pipeline : "
+        "scelle le dossier et envoie un code d'accès au demandeur. Impossible "
+        "sur un dossier déjà scellé (le serveur ne peut plus relire son contenu "
+        "pour le rechiffrer avec un nouveau code)."
+    ),
+    'parameters': [{'name': 'recon_id', 'in': 'path', 'required': True, 'type': 'integer'}],
+    'responses': {
+        200: {'description': 'Code émis et envoyé'},
+        409: {'description': 'Dossier déjà scellé ou rapport PDF absent'},
+        502: {'description': "Échec d'envoi du mail (rien n'est scellé)"},
+    },
+})
+def issue_access(recon_id: int):
+    recon = Recon.query.get_or_404(recon_id)
+    if recon.sealed_at is not None:
+        return jsonify({'success': False, 'error': 'Dossier déjà scellé : code non réémissible'}), 409
+    if not recon.pdf_report:
+        return jsonify({'success': False, 'error': 'Rapport PDF absent : terminez le pipeline avant'}), 409
+    analysis = _load_analysis_from_db(recon) or {}
+    sent, error = _seal_and_notify(recon, analysis)
+    if not sent:
+        return jsonify({'success': False, 'error': error}), 502
+    return jsonify({'success': True, 'data': recon.to_dict()}), 200
+
+
+# ── POST /recon/<id>/revoke_access — révocation du code (admin) ───────────────
+
+@report_bp.route('/recon/<int:recon_id>/revoke_access', methods=['POST'])
+@require_auth
+@swag_from({
+    'tags': ['Accès aux résultats'],
+    'security': [{'basicAuth': []}],
+    'summary': "Révoquer le code d'accès d'un dossier",
+    'description': (
+        "Rend le code inutilisable immédiatement, y compris pour les sessions "
+        "de consultation déjà ouvertes (vérifié à chaque requête). Irréversible : "
+        "le contenu chiffré devient définitivement illisible."
+    ),
+    'parameters': [{'name': 'recon_id', 'in': 'path', 'required': True, 'type': 'integer'}],
+    'responses': {
+        200: {'description': 'Code révoqué'},
+        409: {'description': "Aucun code d'accès émis pour ce dossier"},
+    },
+})
+def revoke_access(recon_id: int):
+    recon = Recon.query.get_or_404(recon_id)
+    if not recon.access_token_hash:
+        return jsonify({'success': False, 'error': "Aucun code d'accès émis"}), 409
+    if recon.access_revoked_at is None:
+        recon.access_revoked_at = datetime.utcnow()
+        db.session.commit()
+        logger.warning('[vault] Code révoqué par l\'admin — recon_id=%d', recon_id)
+    return jsonify({'success': True, 'data': recon.to_dict()}), 200

@@ -1,0 +1,63 @@
+{
+  "_comment": "Résultats bruts de référence pour une cible exposée : CVE Shodan (dont une présente dans KEV), MySQL et SSH exposés, DMARC absent, SPF ~all, CNAME dangling, certificat proche de l'expiration. Aucun réseau.",
+  "domain": "vuln-target.test",
+  "cache": {"cached_at": "2026-10-18T08:00:00", "scan_duration_s": 250.0},
+  "email_config": {
+    "status": "success",
+    "meta": {"tool": "Email Config", "category": "Email / Messagerie"},
+    "data": {"mx": ["10 mail.vuln-target.test."], "spf": "v=spf1 include:_spf.mail.test ~all", "spf_status": "found", "dmarc": null, "dmarc_status": "not_found", "dmarc_policy": null, "security_score": "3/6", "security_level": "Bon"},
+    "raw_output": ";; MX\nvuln-target.test. IN MX 10 mail.vuln-target.test.\n\n;; SPF\nvuln-target.test. IN TXT \"v=spf1 include:_spf.mail.test ~all\""
+  },
+  "spf_analysis": {
+    "status": "success",
+    "meta": {"tool": "SPF Analysis", "category": "Email / Messagerie"},
+    "data": {"all_mechanism": "~all", "lookup_count": 2, "lookup_limit_warning": false},
+    "raw_output": "vuln-target.test: v=spf1 include:_spf.mail.test ~all"
+  },
+  "dmarc_check": {
+    "status": "no_data",
+    "meta": {"tool": "DMARC", "category": "Email / Messagerie"},
+    "data": {"present": false},
+    "error": "Aucun enregistrement DMARC",
+    "raw_output": ""
+  },
+  "ssl_info": {
+    "status": "success",
+    "meta": {"tool": "SSL Info", "category": "SSL / TLS"},
+    "data": {"issuer": {"organizationName": "Let's Encrypt"}, "days_until_expiry": 9, "expired": false, "expiry_warning": true, "tls_version": "TLSv1.2"},
+    "raw_output": "Issuer : Let's Encrypt\nDays Until Exp : 9"
+  },
+  "tls_config": {
+    "status": "success",
+    "meta": {"tool": "TLS Config", "category": "SSL / TLS"},
+    "data": {"weak_protocols": ["TLSv1.0"], "weak_ciphers": []},
+    "raw_output": "ATTENTION : protocoles faibles actifs : TLSv1.0"
+  },
+  "shodan_internetdb": {
+    "status": "success",
+    "meta": {"tool": "Shodan InternetDB", "category": "Vulnérabilités / OSINT"},
+    "data": {
+      "ports": [22, 80, 443, 3306],
+      "cpes": ["cpe:/a:apache:log4j:2.14.1"],
+      "vulns": ["CVE-2019-0001", "CVE-2021-44228"],
+      "vulns_enriched": [
+        {"id": "CVE-2019-0001", "epss": 0.002, "epss_percentile": 0.4, "cvss": 5.0, "summary": "Déni de service"},
+        {"id": "CVE-2021-44228", "epss": 0.97, "epss_percentile": 0.999, "cvss": 10.0, "summary": "Log4Shell"}
+      ],
+      "tags": [], "hostnames": ["vuln-target.test"]
+    },
+    "raw_output": "=== InternetDB 198.51.100.7 (HTTP 200) ===\n{\"ports\":[22,80,443,3306],\"vulns\":[\"CVE-2019-0001\",\"CVE-2021-44228\"]}"
+  },
+  "subdomain_takeover": {
+    "status": "success",
+    "meta": {"tool": "Subdomain Takeover", "category": "Vulnérabilités / OSINT"},
+    "data": {"vulnerable": [{"subdomain": "old.vuln-target.test", "cname": "old-app.herokuapp.com", "service": "Heroku", "confidence": "medium"}], "vulnerable_count": 1, "checked_count": 5, "risk_level": "high"},
+    "raw_output": "old.vuln-target.test CNAME → old-app.herokuapp.com\n  CNAME dangling potentiel [Heroku] — non confirmé (détection passive)"
+  },
+  "dnssec": {
+    "status": "success",
+    "meta": {"tool": "DNSSEC", "category": "DNS / Sécurité"},
+    "data": {"enabled": false, "has_dnskey": false, "has_ds": false},
+    "raw_output": "Aucun DNSKEY"
+  }
+}

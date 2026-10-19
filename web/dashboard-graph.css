@@ -1,0 +1,28 @@
+/* web/dashboard-graph.css — onglet « Graphe & surveillance » (phase 7).
+   Réutilise les variables et classes de dashboard.html ; aucun style inline. */
+.g7-card { margin-bottom: 1rem; }
+.g7-pad { padding: 1rem 1.25rem 0; }
+.g7-notice { margin: 0.5rem 1.25rem 0; font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; }
+.g7-toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; padding: 1rem 1.25rem 0.5rem; }
+.g7-pager { display: flex; gap: 0.5rem; align-items: center; }
+.g7-narrow { width: 5.5rem; }
+.g7-stat { padding: 0.75rem 1rem; }
+.g7-mono { font-family: 'Fira Code', monospace; color: var(--cyan); word-break: break-all; }
+.g7-dim { color: var(--text-dim); font-size: 0.8rem; }
+.g7-warn { color: var(--orange); font-size: 0.85rem; }
+.g7-error { color: var(--red); padding: 0.75rem 1.25rem; }
+.g7-btn { margin-right: 0.35rem; padding: 0.25rem 0.6rem; font-size: 0.75rem; }
+.g7-btn-danger:hover { color: var(--red); }
+.g7-badge { display: inline-block; margin-left: 0.4rem; padding: 1px 8px; border-radius: 999px;
+            font-size: 0.7rem; border: 1px solid var(--border); }
+.g7-badge-warn { color: var(--orange); border-color: rgba(245, 158, 11, 0.5); }
+.g7-badge-ok { color: var(--green); border-color: rgba(0, 255, 136, 0.4); }
+.g7-badge-off { color: var(--text-dim); }
+.g7-diff { margin: 0.5rem 1.25rem 1rem; }
+.g7-diff-head { font-size: 0.85rem; margin: 0.25rem 0 0.5rem; }
+.g7-list { margin: 0 0 0.5rem 1.2rem; font-size: 0.82rem; }
+.g7-details { margin: 0.35rem 0; font-size: 0.8rem; }
+.g7-details > summary { cursor: pointer; color: var(--cyan); }
+.g7-added { color: var(--green); }
+.g7-removed { color: var(--red); }
+#graph-snapshot-detail .g7-diff { margin-top: 1rem; }

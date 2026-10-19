@@ -36,6 +36,8 @@ from models.recon import Recon, utc_iso
 from utils.auth import require_auth
 from utils.email_sender import generate_code, send_verification_email, validate_code, send_error_notification
 from utils.validators import is_valid_domain
+from utils.captcha import verify_turnstile
+from utils.pipeline_trigger import trigger_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,11 @@ _ALLOWED_STATUSES = {'pending', 'running', 'success', 'failed'}
 
 # Durée de validité d'un code OTP (secondes, configurable via .env)
 _OTP_TTL = int(os.getenv('OTP_TTL_SECONDS', '600'))   # 10 min par défaut
+# Tentatives incorrectes tolérées par dossier avant invalidation du code.
+# La limite par IP (10/h) ne suffit pas seule : un attaquant réparti sur
+# plusieurs IP pouvait essayer les 10^6 codes possibles pendant les 10 min de
+# validité. 5 essais ⇒ probabilité de succès de 5/10^6 par code émis.
+_OTP_MAX_ATTEMPTS = int(os.getenv('OTP_MAX_ATTEMPTS', '5'))
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +89,9 @@ _OTP_TTL = int(os.getenv('OTP_TTL_SECONDS', '600'))   # 10 min par défaut
                                'description': 'Consentement au traitement des données'},
                     'requested_info': {'type': 'string', 'example': 'Analyse SSL et sous-domaines',
                                        'description': 'Description libre de la reconnaissance souhaitée'},
+                    'turnstile_token': {'type': 'string',
+                                        'description': 'Jeton Cloudflare Turnstile du formulaire '
+                                                       '(obligatoire si TURNSTILE_SECRET_KEY est défini)'},
                 },
                 'additionalProperties': False
             }
@@ -136,6 +146,20 @@ def create_recon():
         logger.warning("POST /recon — email invalide: %r", data['email'])
         return jsonify({"success": False, "error": "Format d'email invalide"}), 400
 
+    # Consentement obligatoire (2026-10-19) : auparavant `accord` devait être
+    # PRÉSENT mais pouvait valoir false — le scan tournait alors quand même et
+    # seul l'export final était refusé. Une collecte non consentie ne doit
+    # pas démarrer du tout.
+    if data.get('accord') is not True:
+        return jsonify({"success": False,
+                        "error": "Le consentement est requis pour lancer une analyse."}), 400
+
+    # Anti-robot (Cloudflare Turnstile, utils/captcha.py) — avant tout envoi
+    # d'email, pour qu'un script ne puisse pas inonder une boîte de codes.
+    captcha_ok, captcha_error = verify_turnstile(data.get('turnstile_token'), request.remote_addr)
+    if not captcha_ok:
+        return jsonify({"success": False, "error": captcha_error}), 400
+
     # ── Anti-spam OTP ─────────────────────────────────────────────────────────
     # Chaque soumission crée désormais un NOUVEL enregistrement (voir plus bas)
     # — mais un OTP encore valide, sur N'IMPORTE LEQUEL des enregistrements déjà
@@ -185,9 +209,10 @@ def create_recon():
         firstname=data['firstname'],
         lastname=data['lastname'],
         email=data['email'],
-        accord=bool(data.get('accord', False)),
+        accord=True,
         verification=False,
         otp_code=code,
+        otp_attempts=0,
         otp_sent_at=now,
         requested_info=data.get('requested_info'),
         status='pending',
@@ -225,16 +250,18 @@ def create_recon():
 # ---------------------------------------------------------------------------
 
 @crud_bp.route('/verify_email', methods=['POST'])
-@require_auth
 @limiter.limit("10 per hour")
 @swag_from({
     'tags': ['CRUD - Reconnaissance'],
-    'summary': 'Valider le code OTP pour activer un enregistrement',
+    'security': [],
+    'summary': "Valider le code OTP et lancer l'analyse",
     'description': (
-        'Valide le code à 6 chiffres reçu par email. '
-        'Si le code est correct et non expiré, `verification` passe à `true` '
-        'et `start_report_date` est horodaté automatiquement (déclenchement du flow OSINT). '
-        'Le code est effacé après utilisation (usage unique).'
+        'Route PUBLIQUE appelée par le formulaire (plus par n8n). Valide le code à 6 '
+        'chiffres reçu par email. Si le code est correct et non expiré, `verification` '
+        'passe à `true`, `start_report_date` est horodaté et l\'API déclenche le pipeline '
+        'n8n sur le réseau interne (`pipeline_started` dans la réponse).\n\n'
+        f'Le code est effacé après utilisation (usage unique), et après '
+        f'{_OTP_MAX_ATTEMPTS} tentatives incorrectes sur un même dossier.'
     ),
     'parameters': [
         {
@@ -316,11 +343,16 @@ def verify_email():
 
     is_valid, message = validate_code(recon, code)
 
-    # Commit systématique pour persister l'effacement de otp_code (succès ou expiry)
-    if recon.otp_code is None:
-        db.session.commit()
-
     if not is_valid:
+        if recon.otp_code is not None and message == "Code incorrect":
+            recon.otp_attempts = (recon.otp_attempts or 0) + 1
+            if recon.otp_attempts >= _OTP_MAX_ATTEMPTS:
+                recon.otp_code = None
+                message = "Trop de tentatives : ce code est annulé. Soumettez à nouveau le formulaire."
+                logger.warning("verify_email — code annulé après %d échecs, id=%s",
+                               recon.otp_attempts, recon.id)
+        # Persiste l'effacement du code (expiration, trop d'essais) et le compteur
+        db.session.commit()
         logger.warning("verify_email — validation échouée pour %s: %s", email, message)
         return jsonify({"success": False, "error": message}), 400
 
@@ -330,9 +362,25 @@ def verify_email():
     logger.info("verify_email — succès pour id=%s email=%s | start_report_date=%s",
                 recon.id, email, recon.start_report_date.isoformat())
 
+    # Déclenchement du pipeline n8n par l'API, sur le réseau interne
+    # (utils/pipeline_trigger.py) — le navigateur ne parle plus à n8n.
+    pipeline_started, pipeline_error = trigger_pipeline(recon.id)
+    if pipeline_started:
+        recon.status = 'running'
+        recon.set_step('queued')
+        db.session.commit()
+    else:
+        logger.error("verify_email — pipeline non lancé pour id=%s : %s", recon.id, pipeline_error)
+
     return jsonify({
         "success": True,
-        "message": "Email vérifié avec succès. L'enregistrement est maintenant actif.",
+        "message": (
+            "Email vérifié. L'analyse est lancée : vous recevrez un email avec votre code "
+            "d'accès dès que le rapport sera prêt."
+            if pipeline_started else
+            "Email vérifié, mais le lancement de l'analyse a échoué. L'équipe a été prévenue."
+        ),
+        "pipeline_started": pipeline_started,
         "data": recon.to_dict(),
     }), 200
 

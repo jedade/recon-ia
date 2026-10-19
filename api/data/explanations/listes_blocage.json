@@ -1,0 +1,19 @@
+{
+  "id": "listes_blocage",
+  "titre": "Listes de blocage (DNSBL) et réputation des adresses IP",
+  "categorie": "Réputation",
+  "outils": ["dnsbl_check", "abuseipdb_check", "abusech_check", "urlscan_search"],
+  "pourquoi": "Les listes de blocage DNS (Spamhaus, SpamCop, Barracuda…) et les bases de réputation communautaires (AbuseIPDB, URLhaus, ThreatFox) recensent les adresses IP et domaines ayant envoyé du spam, hébergé des logiciels malveillants ou servi de relais d'attaque. Les filtres de messagerie et de nombreux pare-feu s'y réfèrent pour bloquer automatiquement.",
+  "risque": "Une présence sur ces listes signale souvent une compromission (serveur détourné pour envoyer du spam, site piraté hébergeant du hameçonnage) et entraîne le rejet du courrier légitime de l'organisation. Sur un hébergement mutualisé, la mauvaise réputation d'un voisin peut aussi vous affecter.",
+  "comment_corriger": [
+    "Identifier la cause : compte de messagerie compromis, formulaire détourné, logiciel malveillant sur le serveur.",
+    "Nettoyer et sécuriser le système avant toute demande de retrait (sinon la réinscription est immédiate).",
+    "Demander le retrait via la procédure de chaque liste.",
+    "Surveiller la réputation des adresses IP d'envoi dans la durée."
+  ],
+  "references": [
+    {"titre": "RFC 5782 — DNS Blacklists and Whitelists", "url": "https://www.rfc-editor.org/rfc/rfc5782"},
+    {"titre": "Spamhaus — Blocklist removal", "url": "https://check.spamhaus.org/"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}

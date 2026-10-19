@@ -1,0 +1,134 @@
+{
+  "name": "RECON IA RESCAN (surveillance, phase 7)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 0],
+      "id": "6c1f3a52-7d2e-4b8e-9a41-0f7c2b9d1e01",
+      "name": "Daily 03:00 UTC"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://api:8080/monitoring/due",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 0],
+      "id": "6c1f3a52-7d2e-4b8e-9a41-0f7c2b9d1e02",
+      "name": "List Due Domains",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-720, 0],
+      "id": "6c1f3a52-7d2e-4b8e-9a41-0f7c2b9d1e03",
+      "name": "Split Out Domains"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/pass_recon",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"domain\": {{ JSON.stringify($json.domain) }}, \"force_refresh\": true }",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 5000
+            }
+          },
+          "timeout": 1200000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, 0],
+      "id": "6c1f3a52-7d2e-4b8e-9a41-0f7c2b9d1e04",
+      "name": "Passive Rescan (cache refresh)",
+      "continueOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8080/monitoring/{{ Number($('Split Out Domains').item.json.id) }}/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ }",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 0],
+      "id": "6c1f3a52-7d2e-4b8e-9a41-0f7c2b9d1e05",
+      "name": "Ingest: graph + diff (+ admin alert)",
+      "continueOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__CRED_API_SERVICE_ID__",
+          "name": "Recon IA API service token (auto)"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily 03:00 UTC": {
+      "main": [[{ "node": "List Due Domains", "type": "main", "index": 0 }]]
+    },
+    "List Due Domains": {
+      "main": [[{ "node": "Split Out Domains", "type": "main", "index": 0 }]]
+    },
+    "Split Out Domains": {
+      "main": [[{ "node": "Passive Rescan (cache refresh)", "type": "main", "index": 0 }]]
+    },
+    "Passive Rescan (cache refresh)": {
+      "main": [[{ "node": "Ingest: graph + diff (+ admin alert)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "RcnIaRescanWf007",
+  "tags": []
+}

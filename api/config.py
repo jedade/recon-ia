@@ -3,6 +3,7 @@ import os
 import sys
 from dotenv import load_dotenv
 from urllib.parse import quote_plus
+from db_url import with_psycopg2
 
 # ---------------------------------------------------------------------------
 # Chargement des variables d'environnement
@@ -138,8 +139,20 @@ def app_config(app):
         },
         "security": [{"BasicAuth": []}]
     })
+    # Rôle applicatif à droits minimaux (2026-10-19) : si APP_DB_PASSWORD est
+    # défini, l'API s'exécute avec le rôle `recon_app` (lecture/écriture sur
+    # ses tables, AUCUN droit DDL ni accès propriétaire), créé par migrate.py
+    # — qui, lui, garde le compte propriétaire (DATABASE_URL/POSTGRES_*).
+    # Prioritaire sur DATABASE_URL, que `load_dotenv(override=True)` recharge
+    # depuis api/.env avec le compte propriétaire.
+    app_db_password = os.getenv('APP_DB_PASSWORD', '')
     # DATABASE_URL override (utilisé en test pour SQLite in-memory)
     database_url = os.getenv('DATABASE_URL')
+    if app_db_password and not _UNDER_PYTEST and os.getenv('POSTGRES_DB'):
+        database_url = (
+            f"postgresql://{os.getenv('APP_DB_USER', 'recon_app')}:{quote_plus(app_db_password)}"
+            f"@postgres:5432/{os.getenv('POSTGRES_DB')}"
+        )
     if not database_url:
         username = os.getenv('POSTGRES_USER')
         encoded_password = quote_plus(os.getenv('POSTGRES_PASSWORD', ''))
@@ -150,6 +163,6 @@ def app_config(app):
             raise ValueError("❌ POSTGRES_USER et POSTGRES_DB doivent être définis dans .env")
         database_url = f"postgresql://{username}:{encoded_password}@{host}:{port}/{dbname}"
 
-    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_DATABASE_URI'] = with_psycopg2(database_url)
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 Mo max — protection DoS

@@ -1,0 +1,21 @@
+{
+  "id": "spf",
+  "titre": "SPF — serveurs autorisés à envoyer du courriel",
+  "categorie": "Messagerie",
+  "outils": ["spf_analysis", "email_config"],
+  "pourquoi": "SPF (Sender Policy Framework) est un enregistrement DNS TXT qui liste les serveurs et services autorisés à envoyer des courriels pour votre domaine. Le serveur destinataire compare l'adresse IP de l'expéditeur à cette liste. Le mécanisme final « all » précise le traitement des serveurs non listés : -all (refus), ~all (suspect), ?all (neutre) ou +all (tout accepter).",
+  "risque": "Un domaine sans SPF, ou avec +all ou ?all, ne donne aucun moyen de distinguer un serveur légitime d'un serveur d'attaquant : l'usurpation est facilitée. Un SPF qui dépasse la limite de 10 recherches DNS (includes imbriqués) devient invalide (permerror) et cesse de protéger. Chaque include tiers élargit aussi la liste des acteurs capables d'envoyer en votre nom.",
+  "comment_corriger": [
+    "Inventorier toutes les sources d'envoi légitimes du domaine.",
+    "Publier un seul enregistrement TXT commençant par v=spf1, listant ces sources (ip4:, ip6:, include:).",
+    "Terminer par -all (ou ~all pendant une phase de transition courte).",
+    "Rester sous 10 recherches DNS et supprimer les includes de services abandonnés.",
+    "Pour un domaine qui n'envoie aucun courriel : v=spf1 -all."
+  ],
+  "exemple": "exemple.bj. TXT \"v=spf1 include:_spf.google.com ip4:203.0.113.10 -all\"",
+  "references": [
+    {"titre": "RFC 7208 — SPF", "url": "https://www.rfc-editor.org/rfc/rfc7208"},
+    {"titre": "CWE-290 — Authentication Bypass by Spoofing", "url": "https://cwe.mitre.org/data/definitions/290.html"}
+  ],
+  "credits": "Structure inspirée de la page « About » de web-check (Alicia Sykes, licence MIT, https://github.com/Lissy93/web-check). Texte original rédigé en français pour Recon-IA."
+}
